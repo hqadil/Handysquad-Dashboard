@@ -1,0 +1,137 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  password     String        // hashed password
+  name         String?
+  role         String        @default("OPERATIONS") // "ADMIN" | "OPERATIONS"
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  createdJobs  Job[]         @relation("createdJobs")
+  updatedJobs  Job[]         @relation("updatedJobs")
+  createdCosts JobCost[]
+}
+
+model Unit {
+  id               String              @id @default(cuid())
+  name             String
+  type             String              // "MAIN_TEAM" | "SMALL_CREW"
+  defaultHeadcount Int
+  dailyCapacityHr  Int                 @default(9)
+  active           Boolean             @default(true)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  standards        FinancialStandard[]
+  jobs             Job[]
+  dailyRecords     DailyRecord[]
+}
+
+model FinancialStandard {
+  id                          String    @id @default(cuid())
+  unitId                      String
+  unit                        Unit      @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  effectiveStartDate          DateTime
+  effectiveEndDate            DateTime?
+  dailyRevenueTarget          Float     // in INR
+  standardDailyOperatingCost  Float     // in INR
+  dailyCapacityHours          Float     @default(9)
+  outsideManpowerRate         Float     @default(1000) // per person per day
+  minRevenuePerAdditionalTech Float     @default(2000) // INR
+  overtimeRatePerHour         Float     @default(100)  // per person per hour
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+}
+
+model Job {
+  id                     String    @id @default(cuid())
+  title                  String
+  customerRef            String?
+  unitId                 String
+  unit                   Unit      @relation(fields: [unitId], references: [id])
+  scheduledDate          DateTime
+  status                 String    @default("TENTATIVE") // TENTATIVE, CONFIRMED, IN_PROGRESS, COMPLETED, UNFINISHED, CARRIED_FORWARD, CANCELLED
+  bookingStatus          String    @default("TENTATIVE")
+  probabilityWeight      Float     @default(0.6)
+  expectedRevenue        Float     @default(0)
+  finalRevenue           Float?
+  earnedRevenue          Float?
+  estimatedDurationHr    Float     @default(0)
+  actualDurationHr       Float?
+  estimatedTravelHr      Float     @default(0)
+  actualTravelHr         Float?
+  estimatedCompletionPct Float     @default(0)
+  actualCompletionPct    Float?
+  notes                  String?
+  createdById            String?
+  createdBy              User?     @relation("createdJobs", fields: [createdById], references: [id])
+  updatedById            String?
+  updatedBy              User?     @relation("updatedJobs", fields: [updatedById], references: [id])
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  costs                  JobCost[]
+  payments               Payment[]
+}
+
+model JobCost {
+  id          String   @id @default(cuid())
+  jobId       String
+  job         Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  category    String   // OUTSIDE_MANPOWER, OVERTIME, MATERIALS, TRANSPORT, EQUIPMENT, OTHER, REWORK
+  estimated   Float    @default(0)
+  actual      Float?
+  quantity    Float?
+  rate        Float?
+  description String?
+  createdById String?
+  createdBy   User?    @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+}
+
+model DailyRecord {
+  id                       String   @id @default(cuid())
+  date                     DateTime
+  unitId                   String
+  unit                     Unit     @relation(fields: [unitId], references: [id])
+  earnedRevenue            Float    @default(0)
+  standardFixedCost        Float    @default(0)
+  additionalDirectExpenses Float    @default(0)
+  usedHours                Float    @default(0)
+  finalized                Boolean  @default(false)
+  notes                    String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@unique([date, unitId])
+}
+
+model Payment {
+  id            String   @id @default(cuid())
+  jobId         String
+  job           Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  amount        Float
+  paymentDate   DateTime @default(now())
+  paymentMethod String   @default("CASH")
+  reference     String?
+  notes         String?
+  createdAt     DateTime @default(now())
+}
+
+model SharedExpense {
+  id          String   @id @default(cuid())
+  date        DateTime
+  category    String
+  amount      Float
+  description String?
+  reference   String?
+  createdAt   DateTime @default(now())
+}

@@ -483,6 +483,8 @@ export default function App() {
   const cardCapacityPct = isPeriodMode ? (analyticsData?.summary?.capacityUtilizationPct || 0) : dayCapacityPct;
   const cardUsedHrs = isPeriodMode ? (analyticsData?.summary?.totalHoursUtilized || 0) : dayUsedHrs;
   const cardCapacityHrs = isPeriodMode ? (analyticsData?.summary?.totalCapacityHours || 0) : dayCapacityHrs;
+  const cardLostAmt = Math.max(0, cardTargetRevenue - cardEarnedRevenue);
+  const cardLostPct = cardTargetRevenue > 0 ? Math.round((cardLostAmt / cardTargetRevenue) * 100) : 0;
 
   const navItems = [
     { name: 'Dashboard', icon: DashboardIcon },
@@ -821,12 +823,21 @@ export default function App() {
                 </div>
 
                 <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Capacity Utilization</span>
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Lost from Target</span>
                   <div className="mt-2 flex items-baseline gap-2">
-                    <span className="text-2xl font-black text-slate-900">{cardCapacityPct}%</span>
+                    <span className={`text-2xl font-black ${cardLostAmt > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                      {cardLostAmt > 0 ? `-${cardLostPct}%` : '0%'}
+                    </span>
+                    {cardLostAmt > 0 && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">
+                        Shortfall
+                      </span>
+                    )}
                   </div>
                   <p className="mt-2 text-[11px] text-slate-500">
-                    {cardUsedHrs} / {cardCapacityHrs} capacity hours
+                    {cardLostAmt > 0 
+                      ? `-${formatINR(cardLostAmt)} lost from target`
+                      : `Target 100% achieved (${cardUsedHrs}/${cardCapacityHrs} hrs)`}
                   </p>
                 </div>
               </div>
@@ -1239,33 +1250,39 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Capacity Utilization */}
+                  {/* Lost from Target */}
                   <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Capacity Utilization</span>
-                    <div>
-                      <span className="text-2xl font-black text-slate-900">{analyticsData.summary.capacityUtilizationPct}%</span>
-                      <span className="text-xs text-slate-400 block mt-0.5">
-                        {analyticsData.summary.totalHoursUtilized} / {analyticsData.summary.totalCapacityHours} total hours
-                      </span>
-                    </div>
-                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                      <div 
-                        className={`h-2 rounded-full transition-all ${
-                          analyticsData.summary.capacityUtilizationPct > 90 
-                            ? 'bg-rose-500' 
-                            : analyticsData.summary.capacityUtilizationPct > 70 
-                              ? 'bg-emerald-500' 
-                              : 'bg-amber-400'
-                        }`}
-                        style={{ width: `${Math.min(analyticsData.summary.capacityUtilizationPct, 100)}%` }}
-                      />
-                    </div>
-                    <div className="text-[11px] text-slate-500 flex justify-between">
-                      <span>Unused Capacity:</span>
-                      <span className="font-bold text-slate-700">
-                        {Math.max(0, analyticsData.summary.totalCapacityHours - analyticsData.summary.totalHoursUtilized)} hrs
-                      </span>
-                    </div>
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Lost from Target</span>
+                    {(() => {
+                      const target = analyticsData.summary.totalTargetRevenue;
+                      const earned = analyticsData.summary.totalEarnedRevenue;
+                      const lostAmt = Math.max(0, target - earned);
+                      const lostPct = target > 0 ? Math.round((lostAmt / target) * 100) : 0;
+                      return (
+                        <>
+                          <div>
+                            <span className={`text-2xl font-black ${lostAmt > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                              {lostAmt > 0 ? `-${lostPct}%` : '0%'}
+                            </span>
+                            <span className="text-xs text-slate-400 block mt-0.5">
+                              {lostAmt > 0 ? `-${formatINR(lostAmt)} shortfall from target` : '100% Target Met'}
+                            </span>
+                          </div>
+                          <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                            <div 
+                              className={`h-2 rounded-full transition-all ${lostAmt > 0 ? 'bg-rose-500' : 'bg-emerald-500'}`}
+                              style={{ width: `${Math.min(lostPct, 100)}%` }}
+                            />
+                          </div>
+                          <div className="text-[11px] text-slate-500 flex justify-between">
+                            <span>Capacity Logged:</span>
+                            <span className="font-bold text-slate-700">
+                              {analyticsData.summary.totalHoursUtilized} / {analyticsData.summary.totalCapacityHours} hrs
+                            </span>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
 
                   {/* Revenue / Hour & Collections */}

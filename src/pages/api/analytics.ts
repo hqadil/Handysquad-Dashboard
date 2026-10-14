@@ -3,6 +3,17 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getAnalyticsRawData } from '../../lib/db';
 import { calculateRevenueVariance, calculateCapacityMetrics } from '../../lib/finance';
 
+const toDateKey = (d: any): string => {
+  if (!d) return '';
+  if (typeof d === 'string') return d.split('T')[0];
+  if (d instanceof Date) return d.toISOString().split('T')[0];
+  try {
+    return new Date(d).toISOString().split('T')[0];
+  } catch {
+    return '';
+  }
+};
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', ['GET']);
@@ -54,8 +65,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let totalStandardCost = 0;
     let totalCapacityHours = 0;
 
-    units.forEach((u) => {
-      const std = u.standards[0];
+    units.forEach((u: any) => {
+      const std = u.standards?.[0];
       const target = std ? std.dailyRevenueTarget : (u.type === 'MAIN_TEAM' ? 15000 : 10000);
       const cost = std ? std.standardDailyOperatingCost : (u.type === 'MAIN_TEAM' ? 8000 : 5500);
       const cap = std ? std.dailyCapacityHours : (u.dailyCapacityHr || 9);
@@ -66,16 +77,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
 
     // Earned revenue & additional direct expenses from dailyRecords
-    let totalEarnedRevenue = dailyRecords.reduce((acc, r) => acc + (r.earnedRevenue || 0), 0);
-    let totalAdditionalCost = dailyRecords.reduce((acc, r) => acc + (r.additionalDirectExpenses || 0), 0);
-    let totalHoursUtilized = dailyRecords.reduce((acc, r) => acc + (r.usedHours || 0), 0);
+    let totalEarnedRevenue = dailyRecords.reduce((acc: number, r: any) => acc + (Number(r.earnedRevenue) || 0), 0);
+    let totalAdditionalCost = dailyRecords.reduce((acc: number, r: any) => acc + (Number(r.additionalDirectExpenses) || 0), 0);
+    let totalHoursUtilized = dailyRecords.reduce((acc: number, r: any) => acc + (Number(r.usedHours) || 0), 0);
 
     // If dailyRecords have 0 earned and jobs have records, supplement
     if (totalEarnedRevenue === 0 && jobs.length > 0) {
-      totalEarnedRevenue = jobs.reduce((acc, j) => acc + (j.earnedRevenue || 0), 0);
-      totalHoursUtilized = jobs.reduce((acc, j) => acc + (j.actualDurationHr || j.estimatedDurationHr || 0), 0);
-      totalAdditionalCost = jobs.reduce((acc, j) => {
-        const costSum = j.costs.reduce((cAcc, c) => cAcc + (c.actual !== null ? c.actual : c.estimated), 0);
+      totalEarnedRevenue = jobs.reduce((acc: number, j: any) => acc + (Number(j.earnedRevenue) || 0), 0);
+      totalHoursUtilized = jobs.reduce((acc: number, j: any) => acc + (Number(j.actualDurationHr) || Number(j.estimatedDurationHr) || 0), 0);
+      totalAdditionalCost = jobs.reduce((acc: number, j: any) => {
+        const costSum = (j.costs || []).reduce(
+          (cAcc: number, c: any) => cAcc + (c.actual !== null && c.actual !== undefined ? Number(c.actual) : Number(c.estimated) || 0),
+          0
+        );
         return acc + costSum;
       }, 0);
     }
@@ -86,7 +100,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     );
 
     const operationalContribution = totalEarnedRevenue - totalStandardCost - totalAdditionalCost;
-    const totalSharedExpenses = unitId === 'all' ? sharedExpenses.reduce((acc, s) => acc + (s.amount || 0), 0) : 0;
+    const totalSharedExpenses = unitId === 'all'
+      ? sharedExpenses.reduce((acc: number, s: any) => acc + (Number(s.amount) || 0), 0)
+      : 0;
     const netOverallContribution = operationalContribution - totalSharedExpenses;
 
     const capacityMetrics = calculateCapacityMetrics(totalCapacityHours, totalHoursUtilized, totalStandardCost);
@@ -95,32 +111,36 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // Collections vs Outstanding
     let totalCollections = 0;
-    jobs.forEach((j) => {
-      j.payments.forEach((p) => {
-        totalCollections += p.amount;
+    jobs.forEach((j: any) => {
+      (j.payments || []).forEach((p: any) => {
+        totalCollections += Number(p.amount) || 0;
       });
     });
     const totalOutstanding = Math.max(0, totalEarnedRevenue - totalCollections);
 
     // Per-Unit Breakdown
-    const unitBreakdown = units.map((u) => {
-      const std = u.standards[0];
+    const unitBreakdown = units.map((u: any) => {
+      const std = u.standards?.[0];
       const target = (std ? std.dailyRevenueTarget : (u.type === 'MAIN_TEAM' ? 15000 : 10000)) * daysCount;
       const stdCost = (std ? std.standardDailyOperatingCost : (u.type === 'MAIN_TEAM' ? 8000 : 5500)) * daysCount;
       const capHrs = (std ? std.dailyCapacityHours : (u.dailyCapacityHr || 9)) * daysCount;
 
-      const uRecords = dailyRecords.filter((r) => r.unitId === u.id);
-      const uJobs = jobs.filter((j) => j.unitId === u.id);
+      const uRecords = dailyRecords.filter((r: any) => r.unitId === u.id);
+      const uJobs = jobs.filter((j: any) => j.unitId === u.id);
 
-      let earned = uRecords.reduce((acc, r) => acc + (r.earnedRevenue || 0), 0);
-      let addExp = uRecords.reduce((acc, r) => acc + (r.additionalDirectExpenses || 0), 0);
-      let usedHrs = uRecords.reduce((acc, r) => acc + (r.usedHours || 0), 0);
+      let earned = uRecords.reduce((acc: number, r: any) => acc + (Number(r.earnedRevenue) || 0), 0);
+      let addExp = uRecords.reduce((acc: number, r: any) => acc + (Number(r.additionalDirectExpenses) || 0), 0);
+      let usedHrs = uRecords.reduce((acc: number, r: any) => acc + (Number(r.usedHours) || 0), 0);
 
       if (earned === 0 && uJobs.length > 0) {
-        earned = uJobs.reduce((acc, j) => acc + (j.earnedRevenue || 0), 0);
-        usedHrs = uJobs.reduce((acc, j) => acc + (j.actualDurationHr || j.estimatedDurationHr || 0), 0);
-        addExp = uJobs.reduce((acc, j) => {
-          return acc + j.costs.reduce((cAcc, c) => cAcc + (c.actual !== null ? c.actual : c.estimated), 0);
+        earned = uJobs.reduce((acc: number, j: any) => acc + (Number(j.earnedRevenue) || 0), 0);
+        usedHrs = uJobs.reduce((acc: number, j: any) => acc + (Number(j.actualDurationHr) || Number(j.estimatedDurationHr) || 0), 0);
+        addExp = uJobs.reduce((acc: number, j: any) => {
+          const costSum = (j.costs || []).reduce(
+            (cAcc: number, c: any) => cAcc + (c.actual !== null && c.actual !== undefined ? Number(c.actual) : Number(c.estimated) || 0),
+            0
+          );
+          return acc + costSum;
         }, 0);
       }
 
@@ -152,28 +172,32 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const curDate = new Date(startDate);
     while (curDate <= endDate) {
       const dateStr = curDate.toISOString().split('T')[0];
-      const dayRecords = dailyRecords.filter((r) => r.date.toISOString().split('T')[0] === dateStr);
-      const dayJobs = jobs.filter((j) => j.scheduledDate.toISOString().split('T')[0] === dateStr);
+      const dayRecords = dailyRecords.filter((r: any) => toDateKey(r.date) === dateStr);
+      const dayJobs = jobs.filter((j: any) => toDateKey(j.scheduledDate) === dateStr);
 
-      let dayEarned = dayRecords.reduce((acc, r) => acc + (r.earnedRevenue || 0), 0);
-      let dayAddCost = dayRecords.reduce((acc, r) => acc + (r.additionalDirectExpenses || 0), 0);
-      let dayUsedHrs = dayRecords.reduce((acc, r) => acc + (r.usedHours || 0), 0);
+      let dayEarned = dayRecords.reduce((acc: number, r: any) => acc + (Number(r.earnedRevenue) || 0), 0);
+      let dayAddCost = dayRecords.reduce((acc: number, r: any) => acc + (Number(r.additionalDirectExpenses) || 0), 0);
+      let dayUsedHrs = dayRecords.reduce((acc: number, r: any) => acc + (Number(r.usedHours) || 0), 0);
 
       if (dayEarned === 0 && dayJobs.length > 0) {
-        dayEarned = dayJobs.reduce((acc, j) => acc + (j.earnedRevenue || 0), 0);
-        dayUsedHrs = dayJobs.reduce((acc, j) => acc + (j.actualDurationHr || j.estimatedDurationHr || 0), 0);
-        dayAddCost = dayJobs.reduce((acc, j) => {
-          return acc + j.costs.reduce((cAcc, c) => cAcc + (c.actual !== null ? c.actual : c.estimated), 0);
+        dayEarned = dayJobs.reduce((acc: number, j: any) => acc + (Number(j.earnedRevenue) || 0), 0);
+        dayUsedHrs = dayJobs.reduce((acc: number, j: any) => acc + (Number(j.actualDurationHr) || Number(j.estimatedDurationHr) || 0), 0);
+        dayAddCost = dayJobs.reduce((acc: number, j: any) => {
+          const costSum = (j.costs || []).reduce(
+            (cAcc: number, c: any) => cAcc + (c.actual !== null && c.actual !== undefined ? Number(c.actual) : Number(c.estimated) || 0),
+            0
+          );
+          return acc + costSum;
         }, 0);
       }
 
-      const dayTarget = units.reduce((acc, u) => {
-        const std = u.standards[0];
+      const dayTarget = units.reduce((acc: number, u: any) => {
+        const std = u.standards?.[0];
         return acc + (std ? std.dailyRevenueTarget : (u.type === 'MAIN_TEAM' ? 15000 : 10000));
       }, 0);
 
-      const dayStdCost = units.reduce((acc, u) => {
-        const std = u.standards[0];
+      const dayStdCost = units.reduce((acc: number, u: any) => {
+        const std = u.standards?.[0];
         return acc + (std ? std.standardDailyOperatingCost : (u.type === 'MAIN_TEAM' ? 8000 : 5500));
       }, 0);
 

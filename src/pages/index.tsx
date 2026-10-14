@@ -487,7 +487,7 @@ export default function App() {
   const navItems = [
     { name: 'Dashboard', icon: DashboardIcon },
     { name: 'Weekly & Monthly Analysis', icon: TargetIcon },
-    { name: 'What-If Calculator', icon: MagicWandIcon },
+    // { name: 'What-If Calculator', icon: MagicWandIcon }, // Hidden for now
     { name: 'Job Profitability', icon: BarChartIcon },
     { name: 'Jobs and Forecast', icon: CalendarIcon },
     { name: 'Daily Actuals', icon: TableIcon },

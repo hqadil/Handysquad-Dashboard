@@ -225,11 +225,17 @@ export default function App() {
         await loadData();
         await loadAnalytics();
       } else {
-        const data = await res.json();
-        setUnitError(data.error || 'Failed to create team');
+        let errorMsg = 'Failed to create team';
+        try {
+          const data = await res.json();
+          errorMsg = data.error || errorMsg;
+        } catch {
+          errorMsg = `Server error (${res.status}). Please try again.`;
+        }
+        setUnitError(errorMsg);
       }
     } catch (err: any) {
-      setUnitError(err.message);
+      setUnitError(err.message || 'Network error');
     } finally {
       setUnitSaving(false);
     }

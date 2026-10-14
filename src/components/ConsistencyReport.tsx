@@ -55,10 +55,10 @@ export default function ConsistencyReport({ data, unitName = 'All Units', period
       absDevPctSum += devPct;
 
       let status: 'balanced' | 'idle' | 'surge' = 'balanced';
-      if (ratio < 0.85) {
+      if (ratio < 0.90) {
         status = 'idle';
         idleDays++;
-      } else if (ratio > 1.15) {
+      } else if (ratio > 1.10) {
         status = 'surge';
         surgeDays++;
       } else {
@@ -238,19 +238,19 @@ export default function ConsistencyReport({ data, unitName = 'All Units', period
           <div className="space-y-1.5 pt-1 text-xs">
             <div className="flex justify-between items-center text-emerald-700">
               <span className="flex items-center gap-1.5 font-medium">
-                <CheckCircledIcon className="w-3.5 h-3.5" /> Balanced (85-115%):
+                <CheckCircledIcon className="w-3.5 h-3.5" /> Balanced (90-110%):
               </span>
               <span className="font-bold">{balancedDays} days</span>
             </div>
             <div className="flex justify-between items-center text-rose-600">
               <span className="flex items-center gap-1.5 font-medium">
-                <CrossCircledIcon className="w-3.5 h-3.5" /> Idle Waste (&lt;85%):
+                <CrossCircledIcon className="w-3.5 h-3.5" /> Idle Waste (&lt;90%):
               </span>
               <span className="font-bold">{idleDays} days</span>
             </div>
             <div className="flex justify-between items-center text-amber-600">
               <span className="flex items-center gap-1.5 font-medium">
-                <ExclamationTriangleIcon className="w-3.5 h-3.5" /> Overdrive (&gt;115%):
+                <ExclamationTriangleIcon className="w-3.5 h-3.5" /> Overdrive (&gt;110%):
               </span>
               <span className="font-bold">{surgeDays} days</span>
             </div>
@@ -329,7 +329,7 @@ export default function ConsistencyReport({ data, unitName = 'All Units', period
         <div className="flex flex-wrap items-center gap-4 text-xs pt-1 border-t border-slate-100">
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-3 rounded bg-emerald-500 inline-block" />
-            <span className="text-slate-600 font-medium">Optimal Band (85% – 115% of Target)</span>
+            <span className="text-slate-600 font-medium">Optimal Band (90% – 110% of Target)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-3 rounded bg-rose-500 inline-block" />
@@ -515,9 +515,9 @@ export default function ConsistencyReport({ data, unitName = 'All Units', period
                   </td>
                   <td className="px-4 py-3 text-center">
                     <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      d.ratio >= 0.85 && d.ratio <= 1.15
+                      d.ratio >= 0.90 && d.ratio <= 1.10
                         ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                        : d.ratio < 0.85
+                        : d.ratio < 0.90
                         ? 'bg-rose-50 text-rose-700 border border-rose-200'
                         : 'bg-amber-50 text-amber-700 border border-amber-200'
                     }`}>

@@ -1,8 +1,10 @@
 // src/lib/db.ts
-// Unified database service: Supabase PostgreSQL (primary) with SQLite Prisma (fallback)
+// Unified database service: Supabase PostgreSQL (primary) with SQLite Prisma (fallback for local dev)
 
 import { supabase } from './supabase';
 import prisma from './prisma';
+
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 
 export const isSupabaseConfigured = () => Boolean(supabase);
 
@@ -17,7 +19,8 @@ export async function getUnits(all = false) {
       if (!all) query = query.eq('active', true);
 
       const { data, error } = await query;
-      if (!error && data) {
+      if (error) throw error;
+      if (data) {
         // Sort standards by effectiveStartDate desc
         return data.map((u: any) => ({
           ...u,
@@ -26,9 +29,14 @@ export async function getUnits(all = false) {
           ),
         }));
       }
-    } catch (err) {
-      console.warn('Supabase getUnits failed, falling back to Prisma:', err);
+    } catch (err: any) {
+      console.warn('Supabase getUnits failed:', err);
+      if (isServerless) throw new Error(err.message || 'Failed to fetch units from Supabase');
     }
+  }
+
+  if (isServerless) {
+    throw new Error('Database connection failed: Supabase is required in production.');
   }
 
   return prisma.unit.findMany({
@@ -82,9 +90,14 @@ export async function createUnit(data: {
       if (stdErr) throw stdErr;
 
       return { ...unit, standards: [std] };
-    } catch (err) {
-      console.warn('Supabase createUnit failed, falling back to Prisma:', err);
+    } catch (err: any) {
+      console.warn('Supabase createUnit failed:', err);
+      if (isServerless) throw new Error(err.message || 'Failed to create team in Supabase');
     }
+  }
+
+  if (isServerless) {
+    throw new Error('Database connection failed: Supabase is required in production.');
   }
 
   return prisma.unit.create({
@@ -140,9 +153,14 @@ export async function updateUnit(id: string, updates: any) {
       }
 
       return updated;
-    } catch (err) {
-      console.warn('Supabase updateUnit failed, falling back to Prisma:', err);
+    } catch (err: any) {
+      console.warn('Supabase updateUnit failed:', err);
+      if (isServerless) throw new Error(err.message || 'Failed to update team in Supabase');
     }
+  }
+
+  if (isServerless) {
+    throw new Error('Database connection failed: Supabase is required in production.');
   }
 
   const updated = await prisma.unit.update({
@@ -180,10 +198,16 @@ export async function deactivateUnit(id: string) {
         .from('Unit')
         .update({ active: false, updatedAt: new Date().toISOString() })
         .eq('id', id);
-      if (!error) return { success: true };
-    } catch (err) {
-      console.warn('Supabase deactivateUnit failed, falling back to Prisma:', err);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.warn('Supabase deactivateUnit failed:', err);
+      if (isServerless) throw new Error(err.message || 'Failed to deactivate team in Supabase');
     }
+  }
+
+  if (isServerless) {
+    throw new Error('Database connection failed: Supabase is required in production.');
   }
 
   await prisma.unit.update({
@@ -210,10 +234,16 @@ export async function getJobs(filters: { unitId?: string; date?: string }) {
       }
 
       const { data, error } = await query;
-      if (!error && data) return data;
-    } catch (err) {
-      console.warn('Supabase getJobs failed, falling back to Prisma:', err);
+      if (error) throw error;
+      if (data) return data;
+    } catch (err: any) {
+      console.warn('Supabase getJobs failed:', err);
+      if (isServerless) throw new Error(err.message || 'Failed to fetch jobs from Supabase');
     }
+  }
+
+  if (isServerless) {
+    throw new Error('Database connection failed: Supabase is required in production.');
   }
 
   const where: any = {};
@@ -277,9 +307,14 @@ export async function createJob(data: any) {
       }
 
       return job;
-    } catch (err) {
-      console.warn('Supabase createJob failed, falling back to Prisma:', err);
+    } catch (err: any) {
+      console.warn('Supabase createJob failed:', err);
+      if (isServerless) throw new Error(err.message || 'Failed to create job in Supabase');
     }
+  }
+
+  if (isServerless) {
+    throw new Error('Database connection failed: Supabase is required in production.');
   }
 
   return prisma.job.create({
@@ -332,10 +367,16 @@ export async function updateJob(id: string, updates: any) {
         .eq('id', id)
         .select()
         .single();
-      if (!error && data) return data;
-    } catch (err) {
-      console.warn('Supabase updateJob failed, falling back to Prisma:', err);
+      if (error) throw error;
+      if (data) return data;
+    } catch (err: any) {
+      console.warn('Supabase updateJob failed:', err);
+      if (isServerless) throw new Error(err.message || 'Failed to update job in Supabase');
     }
+  }
+
+  if (isServerless) {
+    throw new Error('Database connection failed: Supabase is required in production.');
   }
 
   return prisma.job.update({
@@ -356,10 +397,16 @@ export async function deleteJob(id: string) {
   if (supabase) {
     try {
       const { error } = await supabase.from('Job').delete().eq('id', id);
-      if (!error) return { success: true };
-    } catch (err) {
-      console.warn('Supabase deleteJob failed, falling back to Prisma:', err);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.warn('Supabase deleteJob failed:', err);
+      if (isServerless) throw new Error(err.message || 'Failed to delete job in Supabase');
     }
+  }
+
+  if (isServerless) {
+    throw new Error('Database connection failed: Supabase is required in production.');
   }
 
   await prisma.job.delete({ where: { id } });
@@ -391,9 +438,15 @@ export async function getDailyData(targetDate: Date) {
           shared: sharedRes.data || [],
         };
       }
-    } catch (err) {
-      console.warn('Supabase getDailyData failed, falling back to Prisma:', err);
+      if (recordsRes.error) throw recordsRes.error;
+    } catch (err: any) {
+      console.warn('Supabase getDailyData failed:', err);
+      if (isServerless) throw new Error(err.message || 'Failed to fetch daily records from Supabase');
     }
+  }
+
+  if (isServerless) {
+    throw new Error('Database connection failed: Supabase is required in production.');
   }
 
   const records = await prisma.dailyRecord.findMany({
@@ -432,11 +485,12 @@ export async function upsertDailyRecord(data: {
   if (supabase) {
     try {
       // Find unit's standard fixed cost
-      const { data: unitData } = await supabase
+      const { data: unitData, error: unitErr } = await supabase
         .from('Unit')
         .select('*, standards:FinancialStandard(*)')
         .eq('id', unitId)
         .single();
+      if (unitErr) throw unitErr;
 
       const standardFixedCost = unitData?.standards?.[0]?.standardDailyOperatingCost || (unitData?.type === 'MAIN_TEAM' ? 8000 : 5500);
 
@@ -464,7 +518,8 @@ export async function upsertDailyRecord(data: {
           .eq('id', existing.id)
           .select()
           .single();
-        if (!error && updated) return updated;
+        if (error) throw error;
+        if (updated) return updated;
       } else {
         const { data: created, error } = await supabase
           .from('DailyRecord')
@@ -480,11 +535,17 @@ export async function upsertDailyRecord(data: {
           }])
           .select()
           .single();
-        if (!error && created) return created;
+        if (error) throw error;
+        if (created) return created;
       }
-    } catch (err) {
-      console.warn('Supabase upsertDailyRecord failed, falling back to Prisma:', err);
+    } catch (err: any) {
+      console.warn('Supabase upsertDailyRecord failed:', err);
+      if (isServerless) throw new Error(err.message || 'Failed to save daily record in Supabase');
     }
+  }
+
+  if (isServerless) {
+    throw new Error('Database connection failed: Supabase is required in production.');
   }
 
   const unit = await prisma.unit.findUnique({
@@ -562,9 +623,15 @@ export async function getAnalyticsRawData(startDate: Date, endDate: Date, unitId
           sharedExpenses: sRes.data || [],
         };
       }
-    } catch (err) {
-      console.warn('Supabase getAnalyticsRawData failed, falling back to Prisma:', err);
+      if (uRes.error) throw uRes.error;
+    } catch (err: any) {
+      console.warn('Supabase getAnalyticsRawData failed:', err);
+      if (isServerless) throw new Error(err.message || 'Failed to fetch analytics from Supabase');
     }
+  }
+
+  if (isServerless) {
+    throw new Error('Database connection failed: Supabase is required in production.');
   }
 
   const units = await prisma.unit.findMany({

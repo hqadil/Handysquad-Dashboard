@@ -479,6 +479,7 @@ export default function App() {
   const cardTargetRevenue = isPeriodMode ? (analyticsData?.summary?.totalTargetRevenue || 0) : dayTargetRevenue;
   const cardContribution = isPeriodMode ? (analyticsData?.summary?.operationalContribution || 0) : dayContribution;
   const cardStdCost = isPeriodMode ? (analyticsData?.summary?.totalStandardCost || 0) : dayStdCost;
+  const cardDirectExpense = isPeriodMode ? (analyticsData?.summary?.totalAdditionalCost || 0) : dayAddCost;
   const cardPostShared = isPeriodMode ? (analyticsData?.summary?.netOverallContribution || 0) : dayOverallAfterShared;
   const cardCapacityPct = isPeriodMode ? (analyticsData?.summary?.capacityUtilizationPct || 0) : dayCapacityPct;
   const cardUsedHrs = isPeriodMode ? (analyticsData?.summary?.totalHoursUtilized || 0) : dayUsedHrs;
@@ -807,18 +808,26 @@ export default function App() {
                   </div>
                   <p className="mt-2 text-[11px] text-slate-500">
                     Net after {formatINR(cardStdCost)} fixed cost
+                    {(isPeriodMode ? (analyticsData?.summary?.totalSharedExpenses || 0) : sharedCost) > 0 && (
+                      <span className="ml-1 text-slate-400">· Post-shared: {formatINR(cardPostShared)}</span>
+                    )}
                   </p>
                 </div>
 
                 <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Overall Post-Shared</span>
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Direct Expenses</span>
                   <div className="mt-2 flex items-baseline gap-2">
-                    <span className={`text-2xl font-black ${cardPostShared >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                      {formatINR(cardPostShared)}
+                    <span className="text-2xl font-black text-slate-900">
+                      {formatINR(cardDirectExpense)}
                     </span>
+                    {cardEarnedRevenue > 0 && cardDirectExpense > 0 && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                        {Math.round((cardDirectExpense / cardEarnedRevenue) * 100)}% of Rev
+                      </span>
+                    )}
                   </div>
                   <p className="mt-2 text-[11px] text-slate-500">
-                    Shared expenses: {formatINR(isPeriodMode ? (analyticsData?.summary?.totalSharedExpenses || 0) : sharedCost)}
+                    Chemicals, consumables & outside helpers
                   </p>
                 </div>
 

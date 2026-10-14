@@ -1,6 +1,6 @@
 // src/pages/api/analytics.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import prisma from '../../lib/prisma';
+import { getAnalyticsRawData } from '../../lib/db';
 import { calculateRevenueVariance, calculateCapacityMetrics } from '../../lib/finance';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -46,47 +46,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     startDate.setHours(0, 0, 0, 0);
     endDate.setHours(23, 59, 59, 999);
 
-    // Fetch active units
-    const units = await prisma.unit.findMany({
-      where: unitId === 'all' ? { active: true } : { id: String(unitId), active: true },
-      include: {
-        standards: {
-          orderBy: { effectiveStartDate: 'desc' },
-          take: 1,
-        },
-      },
-    });
-
-    // Fetch daily records in date range
-    const dailyRecords = await prisma.dailyRecord.findMany({
-      where: {
-        date: { gte: startDate, lte: endDate },
-        ...(unitId !== 'all' ? { unitId: String(unitId) } : {}),
-      },
-      include: { unit: true },
-      orderBy: { date: 'asc' },
-    });
-
-    // Fetch jobs in range
-    const jobs = await prisma.job.findMany({
-      where: {
-        scheduledDate: { gte: startDate, lte: endDate },
-        ...(unitId !== 'all' ? { unitId: String(unitId) } : {}),
-      },
-      include: {
-        unit: true,
-        costs: true,
-        payments: true,
-      },
-      orderBy: { scheduledDate: 'asc' },
-    });
-
-    // Fetch shared expenses
-    const sharedExpenses = await prisma.sharedExpense.findMany({
-      where: {
-        date: { gte: startDate, lte: endDate },
-      },
-    });
+    // Fetch raw data (Supabase with Prisma fallback)
+    const { units, dailyRecords, jobs, sharedExpenses } = await getAnalyticsRawData(startDate, endDate, String(unitId));
 
     // Aggregate statistics
     let totalTargetRevenue = 0;

@@ -1,6 +1,6 @@
 // src/pages/api/daily.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import prisma from '../../lib/prisma';
+import { getDailyData, upsertDailyRecord } from '../../lib/db';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === 'GET') {
@@ -9,25 +9,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const targetDate = date ? new Date(String(date)) : new Date();
       targetDate.setHours(0, 0, 0, 0);
 
-      const records = await prisma.dailyRecord.findMany({
-        where: { date: targetDate },
-        include: {
-          unit: {
-            include: {
-              standards: {
-                orderBy: { effectiveStartDate: 'desc' },
-                take: 1,
-              },
-            },
-          },
-        },
-      });
-
-      const shared = await prisma.sharedExpense.findMany({
-        where: { date: targetDate },
-      });
-
-      return res.status(200).json({ records, shared });
+      const data = await getDailyData(targetDate);
+      return res.status(200).json(data);
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
@@ -35,36 +18,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (req.method === 'POST') {
     try {
-      const { id, unitId, date, earnedRevenue, additionalDirectExpenses, usedHours, finalized, notes } = req.body;
+      const { unitId, date, earnedRevenue, additionalDirectExpenses, usedHours, finalized, notes } = req.body;
       const targetDate = date ? new Date(date) : new Date();
       targetDate.setHours(0, 0, 0, 0);
 
-      const unit = await prisma.unit.findUnique({
-        where: { id: unitId },
-        include: { standards: { orderBy: { effectiveStartDate: 'desc' }, take: 1 } },
-      });
-
-      const standardFixedCost = unit?.standards[0]?.standardDailyOperatingCost || (unit?.type === 'MAIN_TEAM' ? 8000 : 5500);
-
-      const record = await prisma.dailyRecord.upsert({
-        where: { date_unitId: { date: targetDate, unitId } },
-        update: {
-          earnedRevenue: Number(earnedRevenue) || 0,
-          additionalDirectExpenses: Number(additionalDirectExpenses) || 0,
-          usedHours: Number(usedHours) || 0,
-          finalized: Boolean(finalized),
-          notes,
-        },
-        create: {
-          date: targetDate,
-          unitId,
-          earnedRevenue: Number(earnedRevenue) || 0,
-          standardFixedCost,
-          additionalDirectExpenses: Number(additionalDirectExpenses) || 0,
-          usedHours: Number(usedHours) || 0,
-          finalized: Boolean(finalized),
-          notes,
-        },
+      const record = await upsertDailyRecord({
+        unitId,
+        date: targetDate,
+        earnedRevenue,
+        additionalDirectExpenses,
+        usedHours,
+        finalized,
+        notes,
       });
 
       return res.status(200).json(record);
@@ -73,6 +38,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 
-  res.setHeader('Allow', ['GET', 'POST']);
+  res.setHeader('Allow', ['GET', 'POST', 'PUT']);
   return res.status(405).end(`Method ${req.method} Not Allowed`);
 }

@@ -20,6 +20,7 @@ import {
 import { formatINR } from '../lib/finance';
 import TimelineLineChart from '../components/TimelineLineChart';
 import WhatIfCalculator from '../components/WhatIfCalculator';
+import ConsistencyReport from '../components/ConsistencyReport';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('Dashboard');
@@ -854,11 +855,18 @@ export default function App() {
               {/* In Period Mode (Week or Custom), Show the Interactive Line Chart right on Dashboard */}
               {isPeriodMode && analyticsData?.trendData && (
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                  <div className="flex justify-between items-center">
+                  <div className="flex flex-wrap justify-between items-center gap-3">
                     <div>
                       <h3 className="text-sm font-bold text-slate-900">Period Economic Trend (Line Chart)</h3>
                       <p className="text-xs text-slate-500">Track Earned Revenue, Daily Target benchmark, and Net Operational Contribution</p>
                     </div>
+                    <button
+                      onClick={() => setActiveTab('Weekly & Monthly Analysis')}
+                      className="text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-all shadow-sm"
+                    >
+                      <span>⚖️ Consistency & Capacity Smoothing Report</span>
+                      <span>→</span>
+                    </button>
                   </div>
                   <TimelineLineChart data={analyticsData.trendData} />
                 </div>
@@ -1328,28 +1336,38 @@ export default function App() {
                       <p className="text-xs text-slate-500">Interactive trend tracking: Earned Revenue, Daily Target benchmark, and Net Contribution</p>
                     </div>
 
-                    {/* Chart Style Toggle: Line Chart vs Cards Grid */}
-                    <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
-                      <button
-                        onClick={() => setTimelineChartType('line')}
-                        className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all ${
-                          timelineChartType === 'line'
-                            ? 'bg-white text-indigo-700 shadow-sm'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
+                    <div className="flex flex-wrap items-center gap-3">
+                      <a
+                        href="#consistency-report"
+                        className="text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-all shadow-sm"
                       >
-                        📈 Line Chart
-                      </button>
-                      <button
-                        onClick={() => setTimelineChartType('cards')}
-                        className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all ${
-                          timelineChartType === 'cards'
-                            ? 'bg-white text-indigo-700 shadow-sm'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        📊 Daily Cards
-                      </button>
+                        <span>⚖️ Consistency & Capacity Smoothing</span>
+                        <span>↓</span>
+                      </a>
+
+                      {/* Chart Style Toggle: Line Chart vs Cards Grid */}
+                      <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+                        <button
+                          onClick={() => setTimelineChartType('line')}
+                          className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all ${
+                            timelineChartType === 'line'
+                              ? 'bg-white text-indigo-700 shadow-sm'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          📈 Line Chart
+                        </button>
+                        <button
+                          onClick={() => setTimelineChartType('cards')}
+                          className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all ${
+                            timelineChartType === 'cards'
+                              ? 'bg-white text-indigo-700 shadow-sm'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          📊 Daily Cards
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -1387,6 +1405,17 @@ export default function App() {
                       })}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* OPERATIONAL CONSISTENCY & CAPACITY SMOOTHING REPORT */}
+              {analyticsData && analyticsData.trendData && (
+                <div id="consistency-report">
+                  <ConsistencyReport 
+                    data={analyticsData.trendData}
+                    unitName={units.find(u => u.id === analyticsUnitId)?.name || 'All Operating Units'}
+                    periodLabel={analyticsPeriod === 'weekly' ? 'Weekly (7 Days)' : analyticsPeriod === 'monthly' ? 'Monthly' : 'Custom Period'}
+                  />
                 </div>
               )}
 

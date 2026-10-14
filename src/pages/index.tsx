@@ -40,8 +40,14 @@ export default function App() {
   // Local editable state for instantaneous table & card calculation
   const [rowInputs, setRowInputs] = useState<Record<string, { earnedRevenue: number; additionalDirectExpenses: number; usedHours: number }>>({});
 
-  // Analytics Dashboard State (Weekly / Monthly / Custom)
-  const [analyticsPeriod, setAnalyticsPeriod] = useState<'weekly' | 'monthly'>('weekly');
+  // Analytics Dashboard State (Weekly / Monthly / Custom Period)
+  const [analyticsPeriod, setAnalyticsPeriod] = useState<'weekly' | 'monthly' | 'custom'>('weekly');
+  const [analyticsFromDate, setAnalyticsFromDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 6);
+    return d.toISOString().split('T')[0];
+  });
+  const [analyticsToDate, setAnalyticsToDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [analyticsUnitId, setAnalyticsUnitId] = useState<string>('all');
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
@@ -128,17 +134,26 @@ export default function App() {
     loadData();
   }, [selectedDate]);
 
-  // Fetch Analytics (Weekly, Monthly, or Period for Dashboard)
+  // Fetch Analytics (Weekly, Monthly, or Custom Period)
   const loadAnalytics = async () => {
     try {
       setAnalyticsLoading(true);
       let url = '';
-      if (dashboardTimeframe === 'week') {
-        url = `/api/analytics?period=weekly&referenceDate=${selectedDate}&unitId=all`;
-      } else if (dashboardTimeframe === 'custom') {
-        url = `/api/analytics?period=custom&fromDate=${selectedDate}&toDate=${customEndDate}&unitId=all`;
+      if (activeTab === 'Dashboard') {
+        if (dashboardTimeframe === 'week') {
+          url = `/api/analytics?period=weekly&referenceDate=${selectedDate}&unitId=all`;
+        } else if (dashboardTimeframe === 'custom') {
+          url = `/api/analytics?period=custom&fromDate=${selectedDate}&toDate=${customEndDate}&unitId=all`;
+        } else {
+          url = `/api/analytics?period=weekly&referenceDate=${selectedDate}&unitId=all`;
+        }
       } else {
-        url = `/api/analytics?period=${analyticsPeriod}&unitId=${analyticsUnitId}&referenceDate=${selectedDate}`;
+        // In Analysis Tab
+        if (analyticsPeriod === 'custom') {
+          url = `/api/analytics?period=custom&fromDate=${analyticsFromDate}&toDate=${analyticsToDate}&unitId=${analyticsUnitId}`;
+        } else {
+          url = `/api/analytics?period=${analyticsPeriod}&unitId=${analyticsUnitId}&referenceDate=${selectedDate}`;
+        }
       }
       const res = await fetch(url);
       const data = await res.json();
@@ -152,7 +167,7 @@ export default function App() {
 
   useEffect(() => {
     loadAnalytics();
-  }, [dashboardTimeframe, selectedDate, customEndDate, analyticsPeriod, analyticsUnitId]);
+  }, [activeTab, dashboardTimeframe, selectedDate, customEndDate, analyticsPeriod, analyticsUnitId, analyticsFromDate, analyticsToDate]);
 
   // Run calculation when simulator form changes
   const runSimulation = async () => {
@@ -801,7 +816,7 @@ export default function App() {
                     </span>
                   </div>
                   <p className="mt-2 text-[11px] text-slate-500">
-                    Shared expenses: {formatINR(sharedCost)}
+                    Shared expenses: {formatINR(isPeriodMode ? (analyticsData?.summary?.totalSharedExpenses || 0) : sharedCost)}
                   </p>
                 </div>
 
@@ -993,25 +1008,50 @@ export default function App() {
                   <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
                     <button
                       onClick={() => setAnalyticsPeriod('weekly')}
-                      className={`text-xs font-bold px-4 py-2 rounded-lg transition-all ${
+                      className={`text-xs font-bold px-3 py-2 rounded-lg transition-all ${
                         analyticsPeriod === 'weekly'
                           ? 'bg-white text-indigo-600 shadow-sm'
                           : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
-                      Weekly Analysis (7 Days)
+                      Weekly (7 Days)
                     </button>
                     <button
                       onClick={() => setAnalyticsPeriod('monthly')}
-                      className={`text-xs font-bold px-4 py-2 rounded-lg transition-all ${
+                      className={`text-xs font-bold px-3 py-2 rounded-lg transition-all ${
                         analyticsPeriod === 'monthly'
                           ? 'bg-white text-indigo-600 shadow-sm'
                           : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
-                      Monthly Analysis (Calendar Month)
+                      Monthly (Month)
+                    </button>
+                    <button
+                      onClick={() => setAnalyticsPeriod('custom')}
+                      className={`text-xs font-bold px-3 py-2 rounded-lg transition-all ${
+                        analyticsPeriod === 'custom'
+                          ? 'bg-white text-indigo-600 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Custom Period
                     </button>
                   </div>
+
+                  {/* Date Pickers for Weekly/Monthly */}
+                  {analyticsPeriod !== 'custom' && (
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs font-semibold text-slate-600">
+                        {analyticsPeriod === 'weekly' ? 'Reference Week:' : 'Reference Month:'}
+                      </label>
+                      <input
+                        type="date"
+                        value={selectedDate}
+                        onChange={(e) => setSelectedDate(e.target.value)}
+                        className="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 font-bold text-slate-800 bg-white"
+                      />
+                    </div>
+                  )}
 
                   {/* Scope / Team Selector */}
                   <div className="flex items-center gap-2">
@@ -1032,7 +1072,9 @@ export default function App() {
                 {/* Date Reference & CSV Export */}
                 <div className="flex items-center gap-3">
                   <div className="text-right">
-                    <span className="text-[11px] font-semibold text-slate-400 block uppercase tracking-wider">Date Window</span>
+                    <span className="text-[11px] font-semibold text-slate-400 block uppercase tracking-wider">
+                      {analyticsData?.daysCount ? `${analyticsData.daysCount} Days Window` : 'Date Window'}
+                    </span>
                     <span className="text-xs font-bold text-slate-900">
                       {analyticsData ? `${analyticsData.startDate} → ${analyticsData.endDate}` : 'Loading...'}
                     </span>
@@ -1044,6 +1086,97 @@ export default function App() {
                     <DownloadIcon className="w-4 h-4" /> Export CSV Report
                   </button>
                 </div>
+
+                {/* Custom Period Sub-bar (when Custom Period is selected) */}
+                {analyticsPeriod === 'custom' && (
+                  <div className="w-full pt-3 mt-1 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs font-semibold text-slate-600">From:</label>
+                        <input
+                          type="date"
+                          value={analyticsFromDate}
+                          onChange={(e) => setAnalyticsFromDate(e.target.value)}
+                          className="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 font-bold text-slate-800 bg-white shadow-sm"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs font-semibold text-slate-600">To:</label>
+                        <input
+                          type="date"
+                          value={analyticsToDate}
+                          onChange={(e) => setAnalyticsToDate(e.target.value)}
+                          className="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 font-bold text-slate-800 bg-white shadow-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Quick Presets */}
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <span className="text-[11px] font-semibold text-slate-400 mr-1">Quick Presets:</span>
+                      <button
+                        onClick={() => {
+                          const to = new Date();
+                          const from = new Date();
+                          from.setDate(to.getDate() - 6);
+                          setAnalyticsFromDate(from.toISOString().split('T')[0]);
+                          setAnalyticsToDate(to.toISOString().split('T')[0]);
+                        }}
+                        className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                      >
+                        Last 7 Days
+                      </button>
+                      <button
+                        onClick={() => {
+                          const to = new Date();
+                          const from = new Date();
+                          from.setDate(to.getDate() - 13);
+                          setAnalyticsFromDate(from.toISOString().split('T')[0]);
+                          setAnalyticsToDate(to.toISOString().split('T')[0]);
+                        }}
+                        className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                      >
+                        Last 14 Days
+                      </button>
+                      <button
+                        onClick={() => {
+                          const to = new Date();
+                          const from = new Date();
+                          from.setDate(to.getDate() - 29);
+                          setAnalyticsFromDate(from.toISOString().split('T')[0]);
+                          setAnalyticsToDate(to.toISOString().split('T')[0]);
+                        }}
+                        className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                      >
+                        Last 30 Days
+                      </button>
+                      <button
+                        onClick={() => {
+                          const now = new Date();
+                          const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+                          const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                          setAnalyticsFromDate(firstDay.toISOString().split('T')[0]);
+                          setAnalyticsToDate(lastDay.toISOString().split('T')[0]);
+                        }}
+                        className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                      >
+                        This Month
+                      </button>
+                      <button
+                        onClick={() => {
+                          const now = new Date();
+                          const firstDay = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                          const lastDay = new Date(now.getFullYear(), now.getMonth(), 0);
+                          setAnalyticsFromDate(firstDay.toISOString().split('T')[0]);
+                          setAnalyticsToDate(lastDay.toISOString().split('T')[0]);
+                        }}
+                        className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                      >
+                        Last Month
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Executive Summary Cards */}

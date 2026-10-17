@@ -16,14 +16,20 @@ import {
   TrashIcon,
   DownloadIcon,
   MagicWandIcon,
+  ChevronDownIcon,
+  ActivityLogIcon,
 } from '@radix-ui/react-icons';
 import { formatINR } from '../lib/finance';
 import TimelineLineChart from '../components/TimelineLineChart';
 import WhatIfCalculator from '../components/WhatIfCalculator';
 import ConsistencyReport from '../components/ConsistencyReport';
+import CustomTrackingApp from '../components/CustomTrackingApp';
 
 export default function App() {
+  const [selectedApp, setSelectedApp] = useState<'economic-calculator' | 'custom-tracker'>('economic-calculator');
+  const [isAppSwitcherOpen, setIsAppSwitcherOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('Dashboard');
+  const [activeTrackerTab, setActiveTrackerTab] = useState('Overview');
   const [units, setUnits] = useState<any[]>([]);
   const [jobs, setJobs] = useState<any[]>([]);
   const [dailyData, setDailyData] = useState<any>({ records: [], shared: [] });
@@ -499,36 +505,153 @@ export default function App() {
     { name: 'Operating Units', icon: LayersIcon },
   ];
 
+  const trackerNavItems = [
+    { name: 'Overview', icon: DashboardIcon },
+    { name: 'Live Tracker Logs', icon: TableIcon },
+    { name: 'Metrics & Trends', icon: BarChartIcon },
+    { name: 'Settings & Targets', icon: GearIcon },
+  ];
+
   return (
     <div className="min-h-screen bg-slate-50 flex font-sans text-slate-800">
       <Head>
-        <title>Handy Squad | Housekeeping Economics</title>
+        <title>Handy Squad | {selectedApp === 'economic-calculator' ? 'Housekeeping Economics' : 'Custom Tracking App'}</title>
       </Head>
 
       {/* Sidebar */}
       <aside className="w-64 bg-white border-r border-slate-200 flex flex-col shrink-0">
-        <div className="h-16 flex items-center px-6 border-b border-slate-200">
-          <div className="flex items-center gap-2 text-indigo-600 font-bold tracking-tight text-lg">
-            <LayersIcon className="w-6 h-6" />
-            <span>Handy Squad</span>
-          </div>
+        {/* App Switcher Dropdown Header */}
+        <div className="relative border-b border-slate-200">
+          <button
+            onClick={() => setIsAppSwitcherOpen(!isAppSwitcherOpen)}
+            className="w-full h-16 px-4 flex items-center justify-between hover:bg-slate-50 transition-colors text-left"
+            title="Click to switch applications"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-sm ${
+                selectedApp === 'economic-calculator' ? 'bg-indigo-600 text-white' : 'bg-emerald-600 text-white'
+              }`}>
+                {selectedApp === 'economic-calculator' ? (
+                  <MixerHorizontalIcon className="w-5 h-5" />
+                ) : (
+                  <ActivityLogIcon className="w-5 h-5" />
+                )}
+              </div>
+              <div className="truncate">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Handy Squad Suite</span>
+                <span className="text-xs font-bold text-slate-900 truncate block">
+                  {selectedApp === 'economic-calculator' ? 'Economic Calculator' : 'Custom Tracking App'}
+                </span>
+              </div>
+            </div>
+            <ChevronDownIcon className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${isAppSwitcherOpen ? 'rotate-180 text-indigo-600' : ''}`} />
+          </button>
+
+          {/* App Switcher Dropdown Popover */}
+          {isAppSwitcherOpen && (
+            <div className="absolute top-16 left-2 right-2 z-50 bg-white rounded-2xl shadow-xl border border-slate-200 p-2 space-y-1.5 animate-fadeIn">
+              <div className="px-3 py-1.5 flex items-center justify-between border-b border-slate-100 pb-1.5">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Applications List</span>
+                <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-1.5 py-0.5 rounded">2 Apps</span>
+              </div>
+
+              {/* App 1: Economic Calculator */}
+              <button
+                onClick={() => {
+                  setSelectedApp('economic-calculator');
+                  setIsAppSwitcherOpen(false);
+                }}
+                className={`w-full flex items-start gap-2.5 p-2.5 rounded-xl text-left transition-all ${
+                  selectedApp === 'economic-calculator' 
+                    ? 'bg-indigo-50/80 border border-indigo-200 shadow-sm' 
+                    : 'hover:bg-slate-50 border border-transparent'
+                }`}
+              >
+                <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                  <MixerHorizontalIcon className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-900 truncate">Economic Calculator</span>
+                    {selectedApp === 'economic-calculator' ? (
+                      <span className="text-[9px] font-bold bg-indigo-600 text-white px-1.5 py-0.5 rounded-full">Active</span>
+                    ) : (
+                      <span className="text-[9px] font-semibold text-slate-400">Open</span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-0.5 leading-tight">
+                    Housekeeping economics, capacity & unit margins
+                  </p>
+                </div>
+              </button>
+
+              {/* App 2: Custom Tracking App */}
+              <button
+                onClick={() => {
+                  setSelectedApp('custom-tracker');
+                  setIsAppSwitcherOpen(false);
+                }}
+                className={`w-full flex items-start gap-2.5 p-2.5 rounded-xl text-left transition-all ${
+                  selectedApp === 'custom-tracker' 
+                    ? 'bg-emerald-50/80 border border-emerald-200 shadow-sm' 
+                    : 'hover:bg-slate-50 border border-transparent'
+                }`}
+              >
+                <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                  <ActivityLogIcon className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-900 truncate">Custom Tracking App</span>
+                    {selectedApp === 'custom-tracker' ? (
+                      <span className="text-[9px] font-bold bg-emerald-600 text-white px-1.5 py-0.5 rounded-full">Active</span>
+                    ) : (
+                      <span className="text-[9px] font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full">Next Up</span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-0.5 leading-tight">
+                    Dedicated tracking application (ready for next prompt)
+                  </p>
+                </div>
+              </button>
+            </div>
+          )}
         </div>
+
+        {/* Dynamic Sidebar Nav depending on selectedApp */}
         <div className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
-          {navItems.map((item) => (
-            <button
-              key={item.name}
-              onClick={() => setActiveTab(item.name)}
-              className={`w-full flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-all ${
-                activeTab === item.name 
-                  ? 'bg-indigo-50 text-indigo-700 shadow-sm font-semibold' 
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-              }`}
-            >
-              <item.icon className={`mr-3 h-5 w-5 ${activeTab === item.name ? 'text-indigo-600' : 'text-slate-400'}`} />
-              {item.name}
-            </button>
-          ))}
+          <div className="px-3 pb-2">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              {selectedApp === 'economic-calculator' ? 'Economics Navigation' : 'Tracker Navigation'}
+            </span>
+          </div>
+          {(selectedApp === 'economic-calculator' ? navItems : trackerNavItems).map((item) => {
+            const isItemActive = selectedApp === 'economic-calculator' 
+              ? activeTab === item.name 
+              : activeTrackerTab === item.name;
+            return (
+              <button
+                key={item.name}
+                onClick={() => {
+                  if (selectedApp === 'economic-calculator') {
+                    setActiveTab(item.name);
+                  } else {
+                    setActiveTrackerTab(item.name);
+                  }
+                }}
+                className={`w-full flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-all ${
+                  isItemActive 
+                    ? (selectedApp === 'economic-calculator' ? 'bg-indigo-50 text-indigo-700 shadow-sm font-semibold' : 'bg-emerald-50 text-emerald-700 shadow-sm font-semibold')
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                }`}
+              >
+                <item.icon className={`mr-3 h-5 w-5 ${isItemActive ? (selectedApp === 'economic-calculator' ? 'text-indigo-600' : 'text-emerald-600') : 'text-slate-400'}`} />
+                {item.name}
+              </button>
+            );
+          })}
         </div>
+
         <div className="p-4 border-t border-slate-200 bg-slate-50">
           <div className="flex items-center gap-3">
             <div className="h-8 w-8 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold text-xs">
@@ -536,7 +659,7 @@ export default function App() {
             </div>
             <div>
               <p className="text-xs font-semibold text-slate-900">Adil (Admin)</p>
-              <p className="text-[10px] text-slate-500">Live SQLite Database</p>
+              <p className="text-[10px] text-slate-500">Live Supabase Database</p>
             </div>
           </div>
         </div>
@@ -547,25 +670,54 @@ export default function App() {
         {/* Top Header */}
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0">
           <div className="flex items-center gap-4">
-            <h1 className="text-xl font-bold text-slate-900">{activeTab}</h1>
-            <span className="bg-indigo-50 text-indigo-700 text-xs px-2.5 py-1 rounded-full font-semibold border border-indigo-100">
-              {units.length} Units Active
-            </span>
+            <div className="hidden sm:flex items-center gap-2 text-sm text-slate-400 font-medium">
+              <span className="hover:text-slate-600 cursor-pointer" onClick={() => setIsAppSwitcherOpen(true)}>Handy Squad Suite</span>
+              <span className="text-slate-300">/</span>
+              <span className="font-semibold text-slate-700">
+                {selectedApp === 'economic-calculator' ? 'Economic Calculator' : 'Custom Tracking App'}
+              </span>
+              <span className="text-slate-300">/</span>
+            </div>
+            <h1 className="text-xl font-bold text-slate-900">
+              {selectedApp === 'economic-calculator' ? activeTab : activeTrackerTab}
+            </h1>
+            {selectedApp === 'economic-calculator' ? (
+              <span className="bg-indigo-50 text-indigo-700 text-xs px-2.5 py-1 rounded-full font-semibold border border-indigo-100">
+                {units.length} Units Active
+              </span>
+            ) : (
+              <span className="bg-emerald-50 text-emerald-700 text-xs px-2.5 py-1 rounded-full font-semibold border border-emerald-100 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Live Application Slot
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowAddUnitModal(true)}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-lg shadow-sm transition flex items-center gap-1.5"
-            >
-              <PlusIcon className="w-4 h-4" /> Add Team
-            </button>
-            <button
-              onClick={() => setActiveTab('Job Profitability')}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-3.5 py-2 rounded-lg shadow-sm transition flex items-center gap-1.5"
-            >
-              <PlusIcon className="w-4 h-4" /> Simulator
-            </button>
+            {selectedApp === 'economic-calculator' ? (
+              <>
+                <button
+                  onClick={() => setShowAddUnitModal(true)}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-lg shadow-sm transition flex items-center gap-1.5"
+                >
+                  <PlusIcon className="w-4 h-4" /> Add Team
+                </button>
+                <button
+                  onClick={() => setActiveTab('Job Profitability')}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-3.5 py-2 rounded-lg shadow-sm transition flex items-center gap-1.5"
+                >
+                  <PlusIcon className="w-4 h-4" /> Simulator
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => setSelectedApp('economic-calculator')}
+                className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold px-3.5 py-2 rounded-lg border border-indigo-200 transition flex items-center gap-1.5 shadow-sm"
+              >
+                <MixerHorizontalIcon className="w-4 h-4" />
+                <span>Switch to Economic Calculator</span>
+              </button>
+            )}
           </div>
         </header>
 
@@ -682,8 +834,14 @@ export default function App() {
         )}
 
         {/* Dynamic Content Views */}
-        <div className="flex-1 overflow-auto p-8">
-          {/* TAB 1: DASHBOARD */}
+        {selectedApp === 'custom-tracker' ? (
+          <CustomTrackingApp 
+            onSwitchToEconomicCalculator={() => setSelectedApp('economic-calculator')} 
+            activeTab={activeTrackerTab} 
+          />
+        ) : (
+          <div className="flex-1 overflow-auto p-8">
+            {/* TAB 1: DASHBOARD */}
           {activeTab === 'Dashboard' && (
             <div className="max-w-7xl mx-auto space-y-6">
               {/* TIMEFRAME SELECTOR & DATE CONTROLS BAR */}
@@ -2049,7 +2207,8 @@ export default function App() {
             </div>
           )}
         </div>
-      </main>
-    </div>
-  );
+      )}
+    </main>
+  </div>
+);
 }

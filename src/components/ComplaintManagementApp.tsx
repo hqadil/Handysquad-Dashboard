@@ -1,5 +1,5 @@
 // src/components/ComplaintManagementApp.tsx
-// HANDY SQUAD: COMPLAINT MANAGEMENT PLATFORM (PHASE 2 - ADVANCED SHELL, DASHBOARD & REGISTER)
+// HANDY SQUAD: COMPLAINT MANAGEMENT PLATFORM (PHASE 3 - EVIDENCE VAULT, INVESTIGATION ENGINE & WORKFLOWS)
 
 import React, { useState, useEffect, useMemo } from 'react';
 import {
@@ -21,7 +21,7 @@ import {
   ArchiveIcon,
   ClockIcon,
   DownloadIcon,
-  ArrowTopRightIcon
+  ArrowTopRightIcon,
 } from '@radix-ui/react-icons';
 import { 
   Complaint, 
@@ -31,7 +31,11 @@ import {
   KeralaCity, 
   ServiceType,
   ComplaintDashboardSummary,
-  Employee
+  Employee,
+  ComplaintEvidence,
+  EvidenceType,
+  InvestigationRecord,
+  ComplaintParticipant
 } from '../types/complaints';
 import { 
   fetchComplaints, 
@@ -40,7 +44,14 @@ import {
   updateComplaintStatus,
   assignComplaintInvestigator,
   addComplaintComment,
-  exportComplaintsToCSV
+  exportComplaintsToCSV,
+  fetchComplaintEvidence,
+  uploadComplaintEvidence,
+  verifyComplaintEvidence,
+  fetchInvestigationRecord,
+  saveInvestigationRecord,
+  updateParticipantStatement,
+  CATEGORY_EVIDENCE_RULES
 } from '../lib/complaintsService';
 import { formatINR } from '../lib/finance';
 
@@ -81,16 +92,46 @@ const STATUS_BADGES: Record<ComplaintStatus, { label: string; bg: string; text: 
   CLOSED: { label: 'Closed', bg: 'bg-slate-100', text: 'text-slate-600' },
 };
 
+const EVIDENCE_TYPE_LABELS: Record<EvidenceType, string> = {
+  BEFORE_PHOTO: 'Before Photo (Pre-Service)',
+  AFTER_PHOTO: 'After Photo (Post-Service)',
+  WORK_ORDER: 'Work Order & Booking Order',
+  CHECKLIST: 'Signed Inspection Checklist',
+  CUSTOMER_COMMUNICATION: 'Customer WhatsApp/SMS/Call',
+  SCOPE_CHANGE: 'Scope Change Document',
+  MAINTENANCE_RECORD: 'Machine Maintenance Log',
+  TRAINING_RECORD: 'Staff Training Certificate',
+  COMPLETION_SIGNOFF: 'Customer Completion Signoff',
+  DAMAGE_ASSESSMENT: 'Damage Expert Assessment',
+  REWORK_PHOTO: 'Rework Verification Photo',
+  AUDIO_RECORDING: 'Recorded Audio/Call Voice Note',
+  OTHER_DOCUMENT: 'Supporting Document',
+};
+
+const ROOT_CAUSE_CATEGORIES = [
+  { id: 'INDIVIDUAL_SKILL_GAP', label: 'Individual Skill / Technique Gap' },
+  { id: 'INSUFFICIENT_TIME_ALLOCATION', label: 'Insufficient Time Allocation / Rushed Job' },
+  { id: 'EQUIPMENT_MALFUNCTION', label: 'Equipment Malfunction / Debris Trap' },
+  { id: 'CHEMICAL_MISAPPLICATION', label: 'Chemical Misapplication / Dilution Error' },
+  { id: 'CUSTOMER_MISUNDERSTANDING', label: 'Customer Misunderstanding of Scope' },
+  { id: 'SCOPE_NOT_IN_WORK_ORDER', label: 'Scope Not Included in Work Order' },
+  { id: 'PRE_EXISTING_DEFECT_NOT_DOCUMENTED', label: 'Pre-Existing Defect (Missed on Pre-Check)' },
+  { id: 'SUPERVISION_LAPSE', label: 'Supervision & Quality Check Lapse' },
+  { id: 'LOGISTICAL_TRAFFIC_DELAY', label: 'Logistical / Transit Delay' },
+  { id: 'FATIGUE_OVERBURDEN', label: 'Crew Fatigue / Overburden' },
+  { id: 'COMPANY_GOODWILL', label: 'Company Goodwill Gesture' },
+];
+
 export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }: ComplaintManagementAppProps) {
   // Navigation Section
   const [activeSubTab, setActiveSubTab] = useState<
-    'Dashboard' | 'Register' | 'Approvals' | 'Employees' | 'Financial' | 'Rules'
+    'Dashboard' | 'Register' | 'Evidence Centre' | 'Approvals' | 'Employees' | 'Financial' | 'Rules'
   >('Dashboard');
 
   // Quick Preset Filter for Register
   const [quickPreset, setQuickPreset] = useState<'all' | 'open' | 'critical' | 'approvals' | 'missing_evidence' | 'rework' | 'closed'>('all');
 
-  // Complaints Data State
+  // Complaints & Employees Data
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [summary, setSummary] = useState<ComplaintDashboardSummary | null>(null);
@@ -104,16 +145,73 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
   const [dateRangePreset, setDateRangePreset] = useState<'all' | '7d' | '30d' | 'this_month'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Evidence Centre Filters
+  const [evidenceFilterComplaint, setEvidenceFilterComplaint] = useState<string>('ALL');
+  const [evidenceFilterType, setEvidenceFilterType] = useState<string>('ALL');
+  const [evidenceFilterVerified, setEvidenceFilterVerified] = useState<'ALL' | 'VERIFIED' | 'UNVERIFIED'>('ALL');
+  const [previewingEvidence, setPreviewingEvidence] = useState<ComplaintEvidence | null>(null);
+
   // Sorting State for Register
   const [sortField, setSortField] = useState<'reportingDate' | 'severity' | 'jobValue' | 'status'>('reportingDate');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
 
   // Selected Complaint for Deep Inspection Drawer
   const [selectedComplaint, setSelectedComplaint] = useState<Complaint | null>(null);
-  const [drawerActiveTab, setDrawerActiveTab] = useState<'overview' | 'crew' | 'financial' | 'actions'>('overview');
+  const [drawerActiveTab, setDrawerActiveTab] = useState<'overview' | 'crew' | 'evidence' | 'investigation' | 'financial' | 'actions'>('overview');
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [newCommentText, setNewCommentText] = useState('');
   const [commentSubmitting, setCommentSubmitting] = useState(false);
+
+  // Investigation Form State inside Drawer
+  const [investigationData, setInvestigationData] = useState<Partial<InvestigationRecord>>({
+    investigationStatus: 'IN_PROGRESS',
+    customerStatement: '',
+    supervisorStatement: '',
+    technicianStatements: '',
+    equipmentStatusCheck: '',
+    materialsUsedCheck: '',
+    arrivalDepartureVerification: '',
+    rootCauseAnalysis: '',
+    rootCauseCategory: 'EQUIPMENT_MALFUNCTION',
+    isPreExistingDamage: false,
+    findingsSummary: '',
+  });
+  const [savingInvestigation, setSavingInvestigation] = useState(false);
+
+  // Upload Evidence Modal State inside Drawer / Evidence Centre
+  const [showUploadEvidenceModal, setShowUploadEvidenceModal] = useState(false);
+  const [targetComplaintForUpload, setTargetComplaintForUpload] = useState<string>('');
+  const [uploadEvidenceForm, setUploadEvidenceForm] = useState<{
+    evidenceType: EvidenceType;
+    title: string;
+    description: string;
+    fileName: string;
+    fileSizeBytes: number;
+    mimeType: string;
+    fileBase64: string;
+    uploadedByName: string;
+  }>({
+    evidenceType: 'BEFORE_PHOTO',
+    title: '',
+    description: '',
+    fileName: '',
+    fileSizeBytes: 0,
+    mimeType: 'image/jpeg',
+    fileBase64: '',
+    uploadedByName: 'Operations Lead',
+  });
+  const [uploadingEvidence, setUploadingEvidence] = useState(false);
+
+  // Verify Evidence Note Modal State
+  const [verifyingEvidenceItem, setVerifyingEvidenceItem] = useState<{ complaintId: string; evidenceId: string } | null>(null);
+  const [verificationNotesInput, setVerificationNotesInput] = useState('');
+  const [submittingVerification, setSubmittingVerification] = useState(false);
+
+  // Participant Statement Modal State
+  const [recordingStatementParticipant, setRecordingStatementParticipant] = useState<ComplaintParticipant | null>(null);
+  const [statementText, setStatementText] = useState('');
+  const [allegationStatusChoice, setAllegationStatusChoice] = useState<'PARTICIPANT' | 'NAMED_IN_COMPLAINT' | 'EXONERATED' | 'SUBSTANTIATED'>('PARTICIPANT');
+  const [savingStatement, setSavingStatement] = useState(false);
 
   // Register Complaint Modal State
   const [showRegisterModal, setShowRegisterModal] = useState(false);
@@ -130,6 +228,10 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     severity: ComplaintSeverity;
     title: string;
     description: string;
+    assignedInvestigatorId: string;
+    assignedInvestigatorName: string;
+    supervisorId: string;
+    leadTechnicianId: string;
     preServiceChecklistDone: boolean;
     postServiceSignoffDone: boolean;
     beforePhotosAvailable: boolean;
@@ -147,6 +249,10 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     severity: 'MODERATE',
     title: '',
     description: '',
+    assignedInvestigatorId: '',
+    assignedInvestigatorName: '',
+    supervisorId: '',
+    leadTechnicianId: '',
     preServiceChecklistDone: false,
     postServiceSignoffDone: false,
     beforePhotosAvailable: false,
@@ -182,11 +288,55 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     loadData();
   }, [selectedCity, selectedCategory, selectedSeverity, selectedStatus, searchQuery]);
 
+  // Load Investigation & Evidence when a Complaint is selected
+  useEffect(() => {
+    if (!selectedComplaint) return;
+    async function loadDetails() {
+      try {
+        const [inv, evList] = await Promise.all([
+          fetchInvestigationRecord(selectedComplaint!.id),
+          fetchComplaintEvidence(selectedComplaint!.id),
+        ]);
+        if (inv) {
+          setInvestigationData(inv);
+        } else {
+          setInvestigationData({
+            investigationStatus: 'IN_PROGRESS',
+            customerStatement: '',
+            supervisorStatement: '',
+            technicianStatements: '',
+            equipmentStatusCheck: '',
+            materialsUsedCheck: '',
+            arrivalDepartureVerification: '',
+            rootCauseAnalysis: '',
+            rootCauseCategory: 'EQUIPMENT_MALFUNCTION',
+            isPreExistingDamage: false,
+            findingsSummary: '',
+          });
+        }
+        if (evList && evList.length > 0) {
+          setSelectedComplaint(prev => prev ? { ...prev, evidence: evList } : null);
+        }
+      } catch (err) {
+        console.warn('Error loading complaint details:', err);
+      }
+    }
+    loadDetails();
+  }, [selectedComplaint?.id]);
+
+  // City-filtered Employees for dropdowns
+  const availableSupervisors = useMemo(() => {
+    return employees.filter(e => e.city === newForm.city && e.designation === 'SUPERVISOR');
+  }, [employees, newForm.city]);
+
+  const availableTechnicians = useMemo(() => {
+    return employees.filter(e => e.city === newForm.city && (e.designation === 'SENIOR_TECHNICIAN' || e.designation === 'TECHNICIAN'));
+  }, [employees, newForm.city]);
+
   // Filtered and Sorted Complaints for Register
   const displayedComplaints = useMemo(() => {
     let result = [...complaints];
 
-    // Quick Preset Filter
     if (quickPreset === 'open') {
       result = result.filter(c => c.status !== 'RESOLVED' && c.status !== 'CLOSED');
     } else if (quickPreset === 'critical') {
@@ -201,7 +351,6 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
       result = result.filter(c => c.status === 'RESOLVED' || c.status === 'CLOSED');
     }
 
-    // Date Range Preset Filter
     if (dateRangePreset !== 'all') {
       const now = Date.now();
       if (dateRangePreset === '7d') {
@@ -216,7 +365,6 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
       }
     }
 
-    // Sorting
     result.sort((a, b) => {
       let comparison = 0;
       if (sortField === 'reportingDate') {
@@ -235,6 +383,45 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     return result;
   }, [complaints, quickPreset, dateRangePreset, sortField, sortAsc]);
 
+  // Aggregate Evidence for Evidence Centre
+  const allEvidence = useMemo(() => {
+    const list: Array<ComplaintEvidence & { complaintNumber: string; customerName: string; category: ComplaintCategory; city: KeralaCity }> = [];
+    complaints.forEach(c => {
+      (c.evidence || []).forEach(e => {
+        list.push({
+          ...e,
+          complaintNumber: c.complaintNumber,
+          customerName: c.customerName,
+          category: c.category,
+          city: c.city,
+        });
+      });
+    });
+    return list;
+  }, [complaints]);
+
+  // Filtered Evidence for Evidence Centre
+  const displayedEvidence = useMemo(() => {
+    return allEvidence.filter(e => {
+      if (evidenceFilterComplaint !== 'ALL' && e.complaintId !== evidenceFilterComplaint) return false;
+      if (evidenceFilterType !== 'ALL' && e.evidenceType !== evidenceFilterType) return false;
+      if (evidenceFilterVerified === 'VERIFIED' && !e.isVerified) return false;
+      if (evidenceFilterVerified === 'UNVERIFIED' && e.isVerified) return false;
+      return true;
+    });
+  }, [allEvidence, evidenceFilterComplaint, evidenceFilterType, evidenceFilterVerified]);
+
+  // Missing Evidence Analysis across complaints
+  const missingEvidenceComplaints = useMemo(() => {
+    return complaints.filter(c => {
+      if (c.status === 'RESOLVED' || c.status === 'CLOSED') return false;
+      const rule = CATEGORY_EVIDENCE_RULES[c.category];
+      if (!rule) return false;
+      const uploadedTypes = new Set((c.evidence || []).map(e => e.evidenceType));
+      return rule.mandatory.some(m => !uploadedTypes.has(m));
+    });
+  }, [complaints]);
+
   // SLA Ageing Calculator helper
   const getSLAInfo = (reportingDate: string, status: ComplaintStatus) => {
     const hours = Math.round((Date.now() - new Date(reportingDate).getTime()) / (1000 * 60 * 60));
@@ -250,15 +437,210 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     };
   };
 
+  // Handle File Input Selection
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setUploadEvidenceForm(prev => ({
+        ...prev,
+        fileName: file.name,
+        fileSizeBytes: file.size,
+        mimeType: file.type || 'image/jpeg',
+        fileBase64: reader.result as string,
+        title: prev.title || file.name.replace(/\.[^/.]+$/, ''),
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Handle Evidence Upload Submit
+  const handleEvidenceUploadSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetId = targetComplaintForUpload || selectedComplaint?.id;
+    if (!targetId) return;
+
+    setUploadingEvidence(true);
+    try {
+      const newEv = await uploadComplaintEvidence(targetId, uploadEvidenceForm);
+      if (newEv) {
+        // Update local complaint evidence
+        setComplaints(prev => prev.map(c => {
+          if (c.id === targetId) {
+            const updatedEv = [newEv, ...(c.evidence || [])];
+            return {
+              ...c,
+              evidence: updatedEv,
+              beforePhotosAvailable: c.beforePhotosAvailable || newEv.evidenceType === 'BEFORE_PHOTO',
+              afterPhotosAvailable: c.afterPhotosAvailable || newEv.evidenceType === 'AFTER_PHOTO',
+              preServiceChecklistDone: c.preServiceChecklistDone || newEv.evidenceType === 'CHECKLIST',
+              postServiceSignoffDone: c.postServiceSignoffDone || newEv.evidenceType === 'COMPLETION_SIGNOFF',
+              workOrderVerified: c.workOrderVerified || newEv.evidenceType === 'WORK_ORDER',
+            };
+          }
+          return c;
+        }));
+
+        if (selectedComplaint && selectedComplaint.id === targetId) {
+          setSelectedComplaint(prev => prev ? {
+            ...prev,
+            evidence: [newEv, ...(prev.evidence || [])],
+            beforePhotosAvailable: prev.beforePhotosAvailable || newEv.evidenceType === 'BEFORE_PHOTO',
+            afterPhotosAvailable: prev.afterPhotosAvailable || newEv.evidenceType === 'AFTER_PHOTO',
+          } : null);
+        }
+
+        setShowUploadEvidenceModal(false);
+        setUploadEvidenceForm({
+          evidenceType: 'BEFORE_PHOTO',
+          title: '',
+          description: '',
+          fileName: '',
+          fileSizeBytes: 0,
+          mimeType: 'image/jpeg',
+          fileBase64: '',
+          uploadedByName: 'Operations Lead',
+        });
+        alert('Evidence uploaded successfully to private storage vault!');
+      }
+    } catch (err) {
+      console.error('Evidence upload failed:', err);
+      alert('Upload failed. Check console.');
+    } finally {
+      setUploadingEvidence(false);
+    }
+  };
+
+  // Handle Evidence Verification Submit
+  const handleVerifyEvidenceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!verifyingEvidenceItem) return;
+
+    setSubmittingVerification(true);
+    try {
+      const ok = await verifyComplaintEvidence(
+        verifyingEvidenceItem.complaintId,
+        verifyingEvidenceItem.evidenceId,
+        true,
+        verificationNotesInput.trim() || 'Verified against job work order'
+      );
+      if (ok) {
+        // Update local state
+        setComplaints(prev => prev.map(c => {
+          if (c.id === verifyingEvidenceItem.complaintId) {
+            return {
+              ...c,
+              evidence: (c.evidence || []).map(ev => 
+                ev.id === verifyingEvidenceItem.evidenceId ? { ...ev, isVerified: true, verificationNotes: verificationNotesInput } : ev
+              ),
+            };
+          }
+          return c;
+        }));
+
+        if (selectedComplaint && selectedComplaint.id === verifyingEvidenceItem.complaintId) {
+          setSelectedComplaint(prev => prev ? {
+            ...prev,
+            evidence: (prev.evidence || []).map(ev => 
+              ev.id === verifyingEvidenceItem.evidenceId ? { ...ev, isVerified: true, verificationNotes: verificationNotesInput } : ev
+            ),
+          } : null);
+        }
+
+        setVerifyingEvidenceItem(null);
+        setVerificationNotesInput('');
+      }
+    } finally {
+      setSubmittingVerification(false);
+    }
+  };
+
+  // Handle Save Investigation Record
+  const handleSaveInvestigation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedComplaint) return;
+
+    setSavingInvestigation(true);
+    try {
+      const saved = await saveInvestigationRecord(selectedComplaint.id, {
+        ...investigationData,
+        investigatorName: selectedComplaint.assignedInvestigatorName || 'Govindan Nair (Ops Lead)',
+      });
+      if (saved) {
+        alert('Investigation findings & root cause analysis successfully recorded!');
+        // Refresh complaint status in state
+        setComplaints(prev => prev.map(c => {
+          if (c.id === selectedComplaint.id) {
+            return {
+              ...c,
+              status: investigationData.investigationStatus === 'COMPLETED' ? 'ASSESSMENT_COMPLETED' : 'UNDER_INVESTIGATION',
+            };
+          }
+          return c;
+        }));
+        setSelectedComplaint(prev => prev ? {
+          ...prev,
+          status: investigationData.investigationStatus === 'COMPLETED' ? 'ASSESSMENT_COMPLETED' : 'UNDER_INVESTIGATION',
+        } : null);
+      }
+    } catch (err) {
+      console.error('Failed to save investigation:', err);
+    } finally {
+      setSavingInvestigation(false);
+    }
+  };
+
+  // Handle Record Participant Statement
+  const handleSaveParticipantStatement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedComplaint || !recordingStatementParticipant) return;
+
+    setSavingStatement(true);
+    try {
+      const ok = await updateParticipantStatement(
+        selectedComplaint.id,
+        recordingStatementParticipant.id,
+        statementText.trim(),
+        allegationStatusChoice
+      );
+      if (ok) {
+        // Update local complaint participants
+        const updatedParticipants = (selectedComplaint.participants || []).map(p => 
+          p.id === recordingStatementParticipant.id ? { ...p, statement: statementText, allegationStatus: allegationStatusChoice } : p
+        );
+        setSelectedComplaint({ ...selectedComplaint, participants: updatedParticipants });
+        setComplaints(prev => prev.map(c => c.id === selectedComplaint.id ? { ...c, participants: updatedParticipants } : c));
+        setRecordingStatementParticipant(null);
+        setStatementText('');
+        alert('Employee statement saved to case file!');
+      }
+    } finally {
+      setSavingStatement(false);
+    }
+  };
+
   // Handle Register Complaint Submission
   const handleRegisterComplaint = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     try {
+      const participantsPayload = [];
+      if (newForm.supervisorId) {
+        participantsPayload.push({ employeeId: newForm.supervisorId, roleOnJob: 'SUPERVISOR' });
+      }
+      if (newForm.leadTechnicianId) {
+        participantsPayload.push({ employeeId: newForm.leadTechnicianId, roleOnJob: 'PRIMARY_TECHNICIAN' });
+      }
+
       const res = await fetch('/api/complaints', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newForm),
+        body: JSON.stringify({
+          ...newForm,
+          participants: participantsPayload,
+        }),
       });
       const data = await res.json();
       if (data.complaint) {
@@ -276,6 +658,10 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
           severity: 'MODERATE',
           title: '',
           description: '',
+          assignedInvestigatorId: '',
+          assignedInvestigatorName: '',
+          supervisorId: '',
+          leadTechnicianId: '',
           preServiceChecklistDone: false,
           postServiceSignoffDone: false,
           beforePhotosAvailable: false,
@@ -301,10 +687,31 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
       if (success) {
         const updated = { ...selectedComplaint, status: newStatus };
         setSelectedComplaint(updated);
-        setComplaints(complaints.map(c => c.id === selectedComplaint.id ? updated : c));
+        setComplaints(complaints.map(c => (c.id === updated.id ? updated : c)));
       }
     } finally {
       setUpdatingStatus(false);
+    }
+  };
+
+  // Handle Investigator Assignment
+  const handleAssignInvestigator = async (empId: string, empName: string) => {
+    if (!selectedComplaint) return;
+    try {
+      const ok = await assignComplaintInvestigator(selectedComplaint.id, empId, empName);
+      if (ok) {
+        const updated = {
+          ...selectedComplaint,
+          assignedInvestigatorId: empId,
+          assignedInvestigatorName: empName,
+          status: 'UNDER_INVESTIGATION' as ComplaintStatus,
+        };
+        setSelectedComplaint(updated);
+        setComplaints(complaints.map(c => (c.id === updated.id ? updated : c)));
+        alert(`Investigator ${empName} assigned! Ticket marked Under Investigation.`);
+      }
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -315,8 +722,8 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     setCommentSubmitting(true);
     try {
       const success = await addComplaintComment(selectedComplaint.id, {
-        authorName: 'Adil (Admin)',
-        authorRole: 'MANAGEMENT_ADMIN',
+        authorName: 'Operations Lead (Investigation Desk)',
+        authorRole: 'OPERATIONS_TEAM',
         commentText: newCommentText.trim(),
       });
       if (success) {
@@ -331,6 +738,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
   const navSections = [
     { id: 'Dashboard', label: 'Management Dashboard', icon: BarChartIcon },
     { id: 'Register', label: 'Complaint Register', icon: TableIcon },
+    { id: 'Evidence Centre', label: 'Evidence Centre', icon: ArchiveIcon },
     { id: 'Approvals', label: 'Approval Centre', icon: TargetIcon },
     { id: 'Employees', label: 'Employee Tracker', icon: PersonIcon },
     { id: 'Financial', label: 'Financial Impact', icon: MixerHorizontalIcon },
@@ -366,6 +774,11 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
               >
                 <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-indigo-600' : 'text-slate-400'}`} />
                 <span>{tab.label}</span>
+                {tab.id === 'Evidence Centre' && missingEvidenceComplaints.length > 0 && (
+                  <span className="ml-1 px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-amber-500 text-white">
+                    {missingEvidenceComplaints.length}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -392,7 +805,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
 
       {/* Main Sub-Tab Workspace */}
       <div className="flex-1 overflow-y-auto p-8 space-y-6">
-        {/* SUB-TAB 1: MANAGEMENT DASHBOARD (PHASE 2 DEEP ANALYTICS) */}
+        {/* SUB-TAB 1: MANAGEMENT DASHBOARD (PHASE 2 ANALYTICS) */}
         {activeSubTab === 'Dashboard' && summary && (
           <div className="max-w-7xl mx-auto space-y-6 animate-fadeIn">
             {/* Top Period & Hub Filter Controls */}
@@ -437,7 +850,6 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
 
             {/* Top KPI Cards Row */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-5">
-              {/* Card 1: Total & Open Complaints */}
               <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-2">
                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Active Complaints</span>
                 <div className="flex items-baseline gap-2">
@@ -448,84 +860,65 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
                 </div>
                 <div className="text-[11px] text-slate-500 flex justify-between pt-1 border-t border-slate-100">
                   <span>Resolved / Closed:</span>
-                  <span className="font-bold text-emerald-600">{summary.totalComplaints - summary.openComplaints} ({summary.totalComplaints > 0 ? Math.round(((summary.totalComplaints - summary.openComplaints) / summary.totalComplaints) * 100) : 0}%)</span>
+                  <span className="font-bold text-slate-700">{summary.totalComplaints - summary.openComplaints}</span>
                 </div>
               </div>
 
-              {/* Card 2: Financial Loss & Rework */}
               <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-2">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Verified Company Loss</span>
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Verified Loss Absorption</span>
                 <div className="flex items-baseline gap-2">
-                  <span className="text-2xl font-black text-rose-600">{formatINR(summary.totalVerifiedLoss)}</span>
-                  <span className="text-[10px] text-slate-400">Absorbed</span>
+                  <span className="text-3xl font-black text-rose-600">{formatINR(summary.totalVerifiedLoss)}</span>
                 </div>
                 <div className="text-[11px] text-slate-500 flex justify-between pt-1 border-t border-slate-100">
                   <span>Pending Estimated:</span>
-                  <span className="font-bold text-amber-600">{formatINR(summary.totalEstimatedLoss)}</span>
+                  <span className="font-bold text-amber-700">{formatINR(summary.totalEstimatedLoss)}</span>
                 </div>
               </div>
 
-              {/* Card 3: Critical & SLA Ageing */}
               <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-2">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Critical & Overdue SLA</span>
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Critical SLA & Escalations</span>
                 <div className="flex items-baseline gap-2">
-                  <span className="text-3xl font-black text-amber-600">{summary.criticalCases}</span>
-                  <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
-                    High Severity
+                  <span className="text-3xl font-black text-orange-600">{summary.criticalCases}</span>
+                  <span className="text-xs text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100">
+                    High Priority
                   </span>
                 </div>
                 <div className="text-[11px] text-slate-500 flex justify-between pt-1 border-t border-slate-100">
-                  <span>Pending Executive Approval:</span>
-                  <span className="font-bold text-slate-800">{summary.pendingApprovals} cases</span>
+                  <span>Pending Approvals:</span>
+                  <span className="font-bold text-slate-700">{summary.pendingApprovals} Cases</span>
                 </div>
               </div>
 
-              {/* Card 4: Documentation Compliance */}
               <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-2">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">SOP Compliance Score</span>
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Documentation Score</span>
                 <div className="flex items-baseline gap-2">
-                  <span className="text-3xl font-black text-emerald-600">{summary.documentationCompliancePct}%</span>
-                  <span className="text-[10px] text-slate-400">Verified SOP</span>
+                  <span className="text-3xl font-black text-indigo-600">{summary.documentationCompliancePct}%</span>
+                  <span className="text-xs text-indigo-600 font-bold bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                    SOP Compliance
+                  </span>
                 </div>
-                <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                  <div
-                    className="bg-emerald-500 h-2 rounded-full"
-                    style={{ width: `${summary.documentationCompliancePct}%` }}
-                  />
+                <div className="text-[11px] text-slate-500 flex justify-between pt-1 border-t border-slate-100">
+                  <span>Rework Orders:</span>
+                  <span className="font-bold text-slate-700">{summary.reworkCount} Scheduled</span>
                 </div>
-                <p className="text-[10px] text-slate-400">Pre/post checklist & photo compliance</p>
               </div>
             </div>
 
-            {/* Regional Hub Breakdown & 10 Complaint Categories Matrix */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Regional Kerala Hub Performance */}
+            {/* City Distribution and Category Breakdown */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900">Kerala Hub Distribution</h3>
-                    <p className="text-xs text-slate-500">Complaints mapped to operational cities</p>
-                  </div>
-                  <span className="text-xs font-bold text-indigo-700">{summary.totalComplaints} total</span>
-                </div>
-                <div className="space-y-3 pt-2">
+                <h3 className="text-sm font-bold text-slate-900">Kerala Hub Distribution</h3>
+                <div className="space-y-3">
                   {Object.entries(summary.cityCounts).map(([city, count]) => {
                     const pct = summary.totalComplaints > 0 ? Math.round((count / summary.totalComplaints) * 100) : 0;
                     return (
                       <div key={city} className="space-y-1">
-                        <div className="flex justify-between text-xs font-semibold">
-                          <span className="text-slate-800">{city} Regional Hub</span>
-                          <span className="text-slate-900 font-bold">{count} cases ({pct}%)</span>
+                        <div className="flex justify-between text-xs font-medium">
+                          <span className="text-slate-700 font-bold">{city} Hub</span>
+                          <span className="text-slate-500 font-mono">{count} tickets ({pct}%)</span>
                         </div>
-                        <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-                          <div 
-                            className={`h-2.5 rounded-full transition-all ${
-                              city === 'Kochi' ? 'bg-indigo-600' :
-                              city === 'Trivandrum' ? 'bg-emerald-600' :
-                              city === 'Kozhikode' ? 'bg-amber-500' : 'bg-purple-600'
-                            }`} 
-                            style={{ width: `${pct}%` }} 
-                          />
+                        <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                          <div className="bg-indigo-600 h-2 rounded-full" style={{ width: `${pct}%` }} />
                         </div>
                       </div>
                     );
@@ -533,287 +926,135 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
                 </div>
               </div>
 
-              {/* 10 Complaint Categories Breakdown */}
-              <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900">Root-Cause Category Breakdown</h3>
-                    <p className="text-xs text-slate-500">Distribution across 10 defined operational categories</p>
-                  </div>
-                </div>
-                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+              <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+                <h3 className="text-sm font-bold text-slate-900">10-Category Incident Breakdown</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   {Object.entries(summary.categoryCounts).map(([cat, count]) => (
-                    <div key={cat} className="flex justify-between items-center p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-xs hover:bg-slate-100 transition">
-                      <span className="font-semibold text-slate-800">{CATEGORY_LABELS[cat as ComplaintCategory] || cat}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-900 px-2 py-0.5 rounded bg-white border border-slate-200">
-                          {count}
-                        </span>
+                    <div key={cat} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
+                      <div>
+                        <span className="font-bold text-slate-800 block">{CATEGORY_LABELS[cat as ComplaintCategory]}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">{cat}</span>
                       </div>
+                      <span className="font-black text-sm px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-indigo-700 shadow-sm">
+                        {count}
+                      </span>
                     </div>
                   ))}
                 </div>
-              </div>
-            </div>
-
-            {/* Repeat Patterns & Supervision Overview */}
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">Supervisor & Crew Accountability Monitoring</h3>
-                  <p className="text-xs text-slate-500">Track substantiated findings vs open investigations by lead supervisor</p>
-                </div>
-                <button
-                  onClick={() => setActiveSubTab('Employees')}
-                  className="text-xs font-bold text-indigo-600 hover:text-indigo-800"
-                >
-                  View Staff Directory →
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 pt-1">
-                {employees.filter(e => e.designation === 'SUPERVISOR').map((sup) => {
-                  const supComplaints = complaints.filter(c => c.assignedInvestigatorName?.includes(sup.fullName));
-                  return (
-                    <div key={sup.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-2">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <span className="text-[10px] font-mono text-slate-400 font-bold block">{sup.employeeCode}</span>
-                          <span className="text-xs font-bold text-slate-900 block">{sup.fullName}</span>
-                        </div>
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700">
-                          {sup.city}
-                        </span>
-                      </div>
-                      <div className="pt-2 border-t border-slate-200 text-[11px] flex justify-between">
-                        <span className="text-slate-500">Assigned Inquiries:</span>
-                        <span className="font-bold text-indigo-700">{supComplaints.length} cases</span>
-                      </div>
-                    </div>
-                  );
-                })}
               </div>
             </div>
           </div>
         )}
 
-        {/* SUB-TAB 2: COMPLAINT REGISTER (PHASE 2 MASTER TABLE & WORKFLOWS) */}
+        {/* SUB-TAB 2: COMPLAINT REGISTER */}
         {activeSubTab === 'Register' && (
           <div className="max-w-7xl mx-auto space-y-4 animate-fadeIn">
-            {/* Preset Quick-View Filter Pills */}
-            <div className="flex flex-wrap items-center gap-2">
-              {[
-                { id: 'all', label: `All Complaints (${complaints.length})` },
-                { id: 'open', label: `Open Active (${summary?.openComplaints || 0})` },
-                { id: 'critical', label: `🔴 Critical & Major (${summary?.criticalCases || 0})` },
-                { id: 'approvals', label: `⏳ Pending Approval (${summary?.pendingApprovals || 0})` },
-                { id: 'missing_evidence', label: `⚠️ Missing Evidence` },
-                { id: 'rework', label: `🔄 Rework in Progress (${summary?.reworkCount || 0})` },
-                { id: 'closed', label: `✅ Resolved & Closed` },
-              ].map((pill) => (
-                <button
-                  key={pill.id}
-                  onClick={() => setQuickPreset(pill.id as any)}
-                  className={`text-xs font-bold px-3 py-1.5 rounded-xl border transition-all ${
-                    quickPreset === pill.id
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
-                  }`}
-                >
-                  {pill.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Filter Controls Bar */}
-            <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-3">
-                {/* Search Input */}
-                <div className="relative min-w-[240px]">
-                  <MagnifyingGlassIcon className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="Search ticket, customer, description..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="text-xs pl-9 pr-3 py-1.5 border border-slate-300 rounded-xl w-full outline-none focus:ring-1 focus:ring-indigo-500"
-                  />
-                </div>
-
-                {/* City Filter */}
-                <select
-                  value={selectedCity}
-                  onChange={(e) => setSelectedCity(e.target.value)}
-                  className="text-xs border border-slate-300 rounded-xl px-2.5 py-1.5 font-semibold text-slate-700 outline-none bg-white"
-                >
-                  <option value="ALL">All Kerala Hubs</option>
-                  <option value="Kochi">Kochi</option>
-                  <option value="Trivandrum">Trivandrum</option>
-                  <option value="Kozhikode">Kozhikode</option>
-                  <option value="Thrissur">Thrissur</option>
-                </select>
-
-                {/* Category Filter */}
-                <select
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="text-xs border border-slate-300 rounded-xl px-2.5 py-1.5 font-semibold text-slate-700 outline-none bg-white"
-                >
-                  <option value="ALL">All Categories</option>
-                  {Object.entries(CATEGORY_LABELS).map(([cat, label]) => (
-                    <option key={cat} value={cat}>{label}</option>
-                  ))}
-                </select>
-
-                {/* Severity Filter */}
-                <select
-                  value={selectedSeverity}
-                  onChange={(e) => setSelectedSeverity(e.target.value)}
-                  className="text-xs border border-slate-300 rounded-xl px-2.5 py-1.5 font-semibold text-slate-700 outline-none bg-white"
-                >
-                  <option value="ALL">All Severities</option>
-                  <option value="MINOR">Minor</option>
-                  <option value="MODERATE">Moderate</option>
-                  <option value="MAJOR">Major</option>
-                  <option value="CRITICAL">Critical</option>
-                </select>
-
-                {/* Status Filter */}
-                <select
-                  value={selectedStatus}
-                  onChange={(e) => setSelectedStatus(e.target.value)}
-                  className="text-xs border border-slate-300 rounded-xl px-2.5 py-1.5 font-semibold text-slate-700 outline-none bg-white"
-                >
-                  <option value="ALL">All Statuses</option>
-                  {Object.entries(STATUS_BADGES).map(([st, badge]) => (
-                    <option key={st} value={st}>{badge.label}</option>
-                  ))}
-                </select>
+            {/* Quick Filter Presets Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm">
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                {[
+                  { id: 'all', label: 'All Cases' },
+                  { id: 'open', label: 'Open / In-Progress' },
+                  { id: 'critical', label: 'Critical & Major' },
+                  { id: 'missing_evidence', label: 'Missing Evidence' },
+                  { id: 'rework', label: 'Rework Active' },
+                  { id: 'closed', label: 'Resolved / Closed' },
+                ].map((pill) => (
+                  <button
+                    key={pill.id}
+                    onClick={() => setQuickPreset(pill.id as any)}
+                    className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
+                      quickPreset === pill.id
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {pill.label}
+                  </button>
+                ))}
               </div>
 
-              {/* Sorting Controls */}
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-slate-400 font-semibold">Sort:</span>
-                <select
-                  value={sortField}
-                  onChange={(e) => setSortField(e.target.value as any)}
-                  className="border border-slate-300 rounded-lg px-2 py-1 font-semibold text-slate-700 bg-white"
-                >
-                  <option value="reportingDate">Date</option>
-                  <option value="severity">Severity</option>
-                  <option value="jobValue">Job Value</option>
-                  <option value="status">Status</option>
-                </select>
-                <button
-                  onClick={() => setSortAsc(!sortAsc)}
-                  className="p-1 border border-slate-300 rounded-lg hover:bg-slate-100 text-slate-600 font-bold"
-                  title="Toggle ascending / descending"
-                >
-                  {sortAsc ? '↑' : '↓'}
-                </button>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search ticket #, customer, issue..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="text-xs bg-slate-50 border border-slate-300 rounded-xl pl-8 pr-3 py-1.5 w-60 outline-none focus:ring-1 focus:ring-indigo-500 font-medium"
+                  />
+                  <MagnifyingGlassIcon className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                </div>
               </div>
             </div>
 
             {/* Complaints Master Table */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-slate-200 text-left">
-                  <thead className="bg-slate-50 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
                     <tr>
-                      <th className="px-5 py-3">Ticket #</th>
-                      <th className="px-4 py-3">SLA / Ageing</th>
-                      <th className="px-4 py-3">Customer & Hub</th>
-                      <th className="px-4 py-3">Category</th>
-                      <th className="px-4 py-3 text-center">Severity</th>
-                      <th className="px-4 py-3 text-center">Status</th>
-                      <th className="px-4 py-3">Investigator</th>
-                      <th className="px-4 py-3 text-right">Job Value</th>
-                      <th className="px-4 py-3 text-center">Evidence / SOP</th>
-                      <th className="px-4 py-3 text-center">Action</th>
+                      <th className="py-3 px-4">Ticket Number</th>
+                      <th className="py-3 px-4">Customer & Location</th>
+                      <th className="py-3 px-4">Category</th>
+                      <th className="py-3 px-4">Severity</th>
+                      <th className="py-3 px-4">SLA Ageing</th>
+                      <th className="py-3 px-4">Assigned Investigator</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4 text-right">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-200 text-xs font-medium text-slate-700">
+                  <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                     {displayedComplaints.length === 0 ? (
                       <tr>
-                        <td colSpan={10} className="px-6 py-12 text-center text-slate-400 text-sm">
-                          No complaints match your active filters. Try resetting search criteria or quick presets.
+                        <td colSpan={8} className="py-8 text-center text-slate-400 italic">
+                          No complaint tickets match the selected filters.
                         </td>
                       </tr>
                     ) : (
                       displayedComplaints.map((c) => {
-                        const sev = SEVERITY_COLORS[c.severity];
-                        const st = STATUS_BADGES[c.status];
                         const sla = getSLAInfo(c.reportingDate, c.status);
                         return (
                           <tr 
                             key={c.id} 
-                            onClick={() => {
-                              setSelectedComplaint(c);
-                              setDrawerActiveTab('overview');
-                            }}
-                            className="hover:bg-indigo-50/40 transition-colors cursor-pointer group"
+                            onClick={() => setSelectedComplaint(c)}
+                            className="hover:bg-slate-50/80 cursor-pointer transition"
                           >
-                            <td className="px-5 py-3 font-mono font-bold text-indigo-700 group-hover:text-indigo-900">
+                            <td className="py-3 px-4 font-mono font-bold text-indigo-700">
                               {c.complaintNumber}
-                              <span className="text-[10px] text-slate-400 block font-normal font-sans">
-                                {new Date(c.reportingDate).toLocaleDateString()}
-                              </span>
                             </td>
-                            <td className="px-4 py-3">
-                              <span className="text-xs font-bold text-slate-800 block">{sla.text}</span>
-                              {sla.isOverdue ? (
-                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200">
-                                  Overdue SLA
-                                </span>
-                              ) : (
-                                <span className="text-[10px] text-slate-400">Normal SLA</span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3">
+                            <td className="py-3 px-4">
                               <span className="font-bold text-slate-900 block">{c.customerName}</span>
-                              <span className="text-[10px] text-slate-400 block">{c.city} · {c.customerPhone}</span>
+                              <span className="text-[10px] text-slate-400">{c.city} · {c.serviceType.replace(/_/g, ' ')}</span>
                             </td>
-                            <td className="px-4 py-3">
-                              <span className="font-semibold text-slate-800 block truncate max-w-[170px]">
-                                {CATEGORY_LABELS[c.category] || c.category}
-                              </span>
-                              <span className="text-[10px] text-slate-400 block">{c.serviceType.replace(/_/g, ' ')}</span>
+                            <td className="py-3 px-4">
+                              <span className="font-semibold text-slate-800">{CATEGORY_LABELS[c.category]}</span>
                             </td>
-                            <td className="px-4 py-3 text-center">
-                              <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full border ${sev.bg} ${sev.text} ${sev.border}`}>
+                            <td className="py-3 px-4">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${SEVERITY_COLORS[c.severity].bg} ${SEVERITY_COLORS[c.severity].text} ${SEVERITY_COLORS[c.severity].border}`}>
                                 {c.severity}
                               </span>
                             </td>
-                            <td className="px-4 py-3 text-center">
-                              <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full ${st.bg} ${st.text}`}>
-                                {st.label}
+                            <td className="py-3 px-4">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${sla.isOverdue ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-slate-100 text-slate-600'}`}>
+                                {sla.badge}
                               </span>
                             </td>
-                            <td className="px-4 py-3 text-slate-600">
-                              {c.assignedInvestigatorName || <span className="text-slate-400 italic">Unassigned</span>}
+                            <td className="py-3 px-4">
+                              <span className="text-xs text-slate-700">{c.assignedInvestigatorName || <span className="text-amber-600 italic">Unassigned</span>}</span>
                             </td>
-                            <td className="px-4 py-3 text-right font-bold text-slate-900">
-                              {formatINR(c.jobValue)}
+                            <td className="py-3 px-4">
+                              <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${STATUS_BADGES[c.status].bg} ${STATUS_BADGES[c.status].text}`}>
+                                {STATUS_BADGES[c.status].label}
+                              </span>
                             </td>
-                            <td className="px-4 py-3 text-center">
-                              {c.preServiceChecklistDone && c.workOrderVerified && (c.beforePhotosAvailable || c.afterPhotosAvailable) ? (
-                                <span className="text-emerald-600 font-bold text-[10px] flex items-center justify-center gap-1">
-                                  <CheckCircledIcon className="w-3.5 h-3.5" /> SOP OK
-                                </span>
-                              ) : (
-                                <span className="text-amber-600 font-bold text-[10px] flex items-center justify-center gap-1">
-                                  <ExclamationTriangleIcon className="w-3.5 h-3.5" /> Gaps
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <button
+                            <td className="py-3 px-4 text-right">
+                              <button 
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setSelectedComplaint(c);
-                                  setDrawerActiveTab('overview');
                                 }}
-                                className="text-xs font-bold text-indigo-600 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg border border-indigo-200 transition"
+                                className="text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg transition"
                               >
                                 Inspect →
                               </button>
@@ -829,53 +1070,244 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
           </div>
         )}
 
-        {/* SUB-TAB 3: APPROVAL CENTRE */}
-        {activeSubTab === 'Approvals' && (
-          <div className="max-w-7xl mx-auto space-y-4 animate-fadeIn">
-            <div className="flex justify-between items-center">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Executive Approval Centre</h3>
-                <p className="text-xs text-slate-500">Authorized sign-offs for financial loss, responsibility findings, and customer compensation</p>
+        {/* SUB-TAB 3: EVIDENCE CENTRE (PHASE 3 DEDICATED REPOSITORY) */}
+        {activeSubTab === 'Evidence Centre' && (
+          <div className="max-w-7xl mx-auto space-y-6 animate-fadeIn">
+            {/* Evidence Centre Header & Metrics */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Vault Files</span>
+                <span className="text-2xl font-black text-slate-900">{allEvidence.length} Recorded</span>
+                <span className="text-[10px] text-slate-500 block">Private Supabase Storage Bucket</span>
               </div>
-              <span className="text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 px-3 py-1 rounded-full">
-                {summary?.pendingApprovals || 0} Decisions Pending
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Verified Compliance</span>
+                <span className="text-2xl font-black text-emerald-700">
+                  {allEvidence.length > 0 ? Math.round((allEvidence.filter(e => e.isVerified).length / allEvidence.length) * 100) : 0}%
+                </span>
+                <span className="text-[10px] text-emerald-600 block">Checked by Operations Lead</span>
+              </div>
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Missing Evidence Warnings</span>
+                <span className="text-2xl font-black text-amber-600">{missingEvidenceComplaints.length} Tickets</span>
+                <span className="text-[10px] text-amber-600 block">Requires investigation follow-up</span>
+              </div>
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Storage Access Policy</span>
+                  <span className="text-xs font-bold text-slate-700 mt-1 block">Private Signed URLs (3600s)</span>
+                </div>
+                <button
+                  onClick={() => {
+                    setTargetComplaintForUpload(complaints[0]?.id || '');
+                    setShowUploadEvidenceModal(true);
+                  }}
+                  className="mt-2 w-full text-xs font-bold py-1.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex items-center justify-center gap-1.5 transition"
+                >
+                  <PlusIcon className="w-3.5 h-3.5" />
+                  <span>Upload Evidence File</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Missing Evidence Warnings Alerts */}
+            {missingEvidenceComplaints.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl space-y-2">
+                <div className="flex items-center gap-2">
+                  <ExclamationTriangleIcon className="w-4 h-4 text-amber-600" />
+                  <span className="text-xs font-bold text-amber-900">
+                    Category Evidence Alerts ({missingEvidenceComplaints.length} open tickets have missing documentation)
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                  {missingEvidenceComplaints.slice(0, 4).map(c => {
+                    const rule = CATEGORY_EVIDENCE_RULES[c.category];
+                    const uploadedTypes = new Set((c.evidence || []).map(e => e.evidenceType));
+                    const missing = rule.mandatory.filter(m => !uploadedTypes.has(m));
+                    return (
+                      <div key={c.id} className="bg-white p-2.5 rounded-xl border border-amber-200 flex justify-between items-center">
+                        <div>
+                          <span className="font-mono font-bold text-indigo-700">{c.complaintNumber}</span>
+                          <span className="text-slate-600 block text-[11px] font-medium">{c.customerName} ({CATEGORY_LABELS[c.category]})</span>
+                          <span className="text-[10px] text-rose-600 font-bold">Missing: {missing.map(m => EVIDENCE_TYPE_LABELS[m]).join(', ')}</span>
+                        </div>
+                        <button
+                          onClick={() => setSelectedComplaint(c)}
+                          className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-2.5 py-1 rounded-lg"
+                        >
+                          Review →
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Evidence Filtering Bar */}
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-bold text-slate-500 uppercase tracking-wider text-[10px]">Filter Files:</span>
+                <select
+                  value={evidenceFilterType}
+                  onChange={(e) => setEvidenceFilterType(e.target.value)}
+                  className="border border-slate-300 rounded-xl px-2.5 py-1.5 font-bold text-slate-800 bg-white"
+                >
+                  <option value="ALL">All Evidence Types</option>
+                  {Object.entries(EVIDENCE_TYPE_LABELS).map(([k, lbl]) => (
+                    <option key={k} value={k}>{lbl}</option>
+                  ))}
+                </select>
+
+                <select
+                  value={evidenceFilterVerified}
+                  onChange={(e) => setEvidenceFilterVerified(e.target.value as any)}
+                  className="border border-slate-300 rounded-xl px-2.5 py-1.5 font-bold text-slate-800 bg-white"
+                >
+                  <option value="ALL">All Verification States</option>
+                  <option value="VERIFIED">Verified Only (✓)</option>
+                  <option value="UNVERIFIED">Pending Verification</option>
+                </select>
+              </div>
+
+              <span className="text-slate-400 font-mono text-[11px]">
+                Showing {displayedEvidence.length} of {allEvidence.length} items
               </span>
             </div>
 
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
-              {complaints.filter(c => c.status === 'APPROVAL_PENDING').length === 0 ? (
-                <div className="text-center py-12 text-slate-400 space-y-2">
-                  <CheckCircledIcon className="w-8 h-8 text-emerald-500 mx-auto" />
-                  <p className="text-sm font-bold text-slate-700">All Approvals Up to Date</p>
-                  <p className="text-xs">No pending responsibility assessments or compensation requests in queue.</p>
+            {/* Evidence Gallery Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+              {displayedEvidence.length === 0 ? (
+                <div className="col-span-3 bg-white p-12 text-center rounded-2xl border border-slate-200 text-slate-400 italic">
+                  No evidence files match the selected filters.
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {complaints.filter(c => c.status === 'APPROVAL_PENDING').map(c => (
-                    <div key={c.id} className="p-4 rounded-xl border border-amber-200 bg-amber-50/30 flex justify-between items-center">
-                      <div>
-                        <span className="font-mono text-xs font-bold text-indigo-700 block">{c.complaintNumber}</span>
-                        <span className="text-sm font-bold text-slate-900">{c.title}</span>
-                        <span className="text-xs text-slate-500 block">Customer: {c.customerName} · Job Value: {formatINR(c.jobValue)}</span>
+                displayedEvidence.map((ev) => {
+                  const isImage = ev.mimeType.startsWith('image/');
+                  const isAudio = ev.mimeType.startsWith('audio/');
+                  const isPdf = ev.mimeType === 'application/pdf';
+
+                  return (
+                    <div key={ev.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition flex flex-col justify-between">
+                      {/* Thumbnail / Header */}
+                      <div className="relative bg-slate-100 aspect-video flex items-center justify-center overflow-hidden border-b border-slate-100">
+                        {isImage && ev.downloadUrl ? (
+                          <img 
+                            src={ev.downloadUrl} 
+                            alt={ev.title} 
+                            className="w-full h-full object-cover cursor-pointer hover:scale-105 transition"
+                            onClick={() => setPreviewingEvidence(ev)}
+                          />
+                        ) : isAudio ? (
+                          <div className="text-center p-4">
+                            <span className="text-3xl block">🎙️</span>
+                            <span className="text-[11px] font-bold text-slate-600 mt-1 block">Audio / Voice Note</span>
+                          </div>
+                        ) : isPdf ? (
+                          <div className="text-center p-4">
+                            <span className="text-3xl block">📄</span>
+                            <span className="text-[11px] font-bold text-slate-600 mt-1 block">PDF Work Order / Checklist</span>
+                          </div>
+                        ) : (
+                          <FileTextIcon className="w-10 h-10 text-slate-400" />
+                        )}
+
+                        <span className="absolute top-2 left-2 text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-900/80 text-white backdrop-blur-sm">
+                          {EVIDENCE_TYPE_LABELS[ev.evidenceType] || ev.evidenceType}
+                        </span>
+
+                        {ev.isVerified ? (
+                          <span className="absolute top-2 right-2 text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1 shadow-sm">
+                            <CheckCircledIcon className="w-3 h-3" />
+                            Verified
+                          </span>
+                        ) : (
+                          <span className="absolute top-2 right-2 text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-500 text-white shadow-sm">
+                            Unverified
+                          </span>
+                        )}
                       </div>
-                      <button
-                        onClick={() => {
-                          setSelectedComplaint(c);
-                          setDrawerActiveTab('actions');
-                        }}
-                        className="text-xs font-bold px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white shadow-sm"
-                      >
-                        Review & Approve →
-                      </button>
+
+                      {/* Content details */}
+                      <div className="p-4 space-y-2 flex-1 flex flex-col justify-between">
+                        <div>
+                          <div className="flex justify-between items-start">
+                            <span className="text-[10px] font-mono font-bold text-indigo-700">{ev.complaintNumber}</span>
+                            <span className="text-[10px] text-slate-400">{ev.city}</span>
+                          </div>
+                          <h4 className="text-xs font-bold text-slate-900 mt-1">{ev.title}</h4>
+                          <p className="text-[11px] text-slate-500 line-clamp-2 mt-0.5">{ev.description || 'No description provided.'}</p>
+                        </div>
+
+                        <div className="pt-2 border-t border-slate-100 text-[10px] text-slate-400 space-y-1">
+                          <div className="flex justify-between">
+                            <span>Uploaded by:</span>
+                            <span className="font-semibold text-slate-700">{ev.uploadedByName}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>File Name:</span>
+                            <span className="font-mono text-slate-600 truncate max-w-[150px]">{ev.fileName}</span>
+                          </div>
+                        </div>
+
+                        {/* Action buttons */}
+                        <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                          {ev.downloadUrl ? (
+                            <button
+                              onClick={() => setPreviewingEvidence(ev)}
+                              className="flex-1 text-center text-xs font-bold py-1.5 px-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition"
+                            >
+                              Inspect File
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-slate-400 italic">No public preview</span>
+                          )}
+
+                          {!ev.isVerified && (
+                            <button
+                              onClick={() => setVerifyingEvidenceItem({ complaintId: ev.complaintId, evidenceId: ev.id })}
+                              className="text-xs font-bold py-1.5 px-3 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 transition"
+                            >
+                              Verify ✓
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  ))}
-                </div>
+                  );
+                })
               )}
             </div>
           </div>
         )}
 
-        {/* SUB-TAB 4: EMPLOYEES & TRAINING */}
+        {/* SUB-TAB 4: APPROVALS */}
+        {activeSubTab === 'Approvals' && (
+          <div className="max-w-7xl mx-auto space-y-6 animate-fadeIn">
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-3">
+              <h3 className="text-sm font-bold text-slate-900">Executive Approval Centre & Responsibility Decisions</h3>
+              <p className="text-xs text-slate-500">Dual-authorization routing for financial adjustments, customer goodwill absorption, and corrective action enforcement</p>
+              
+              <div className="p-4 bg-amber-50 rounded-xl border border-amber-200 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <TargetIcon className="w-5 h-5 text-amber-700" />
+                  <div>
+                    <span className="text-xs font-bold text-amber-900 block">3 Cases Pending Executive Sanction</span>
+                    <span className="text-[11px] text-amber-700">Financial absorption &gt; ₹5,000 requires Operations Manager + COO approval</span>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setActiveSubTab('Register')}
+                  className="text-xs font-bold px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white"
+                >
+                  View in Register
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SUB-TAB 5: EMPLOYEE TRACKER */}
         {activeSubTab === 'Employees' && (
           <div className="max-w-7xl mx-auto space-y-4 animate-fadeIn">
             <div className="flex justify-between items-center">
@@ -926,7 +1358,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
           </div>
         )}
 
-        {/* SUB-TAB 5: FINANCIAL IMPACT */}
+        {/* SUB-TAB 6: FINANCIAL IMPACT */}
         {activeSubTab === 'Financial' && summary && (
           <div className="max-w-7xl mx-auto space-y-6 animate-fadeIn">
             <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
@@ -954,7 +1386,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
           </div>
         )}
 
-        {/* SUB-TAB 6: RULES & GOVERNANCE */}
+        {/* SUB-TAB 7: RULES & GOVERNANCE */}
         {activeSubTab === 'Rules' && (
           <div className="max-w-7xl mx-auto space-y-4 animate-fadeIn">
             <div>
@@ -963,32 +1395,41 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {Object.entries(CATEGORY_LABELS).map(([cat, title]) => (
-                <div key={cat} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-2">
-                  <div className="flex justify-between items-start">
-                    <h4 className="text-xs font-bold text-slate-900">{title}</h4>
-                    <span className="text-[10px] font-mono font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
-                      {cat}
-                    </span>
+              {Object.entries(CATEGORY_LABELS).map(([cat, title]) => {
+                const rule = CATEGORY_EVIDENCE_RULES[cat as ComplaintCategory];
+                return (
+                  <div key={cat} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-2">
+                    <div className="flex justify-between items-start">
+                      <h4 className="text-xs font-bold text-slate-900">{title}</h4>
+                      <span className="text-[10px] font-mono font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
+                        {cat}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 leading-relaxed">
+                      {rule?.complianceWarning || 'Requires comprehensive work order alignment and SOP documentation.'}
+                    </p>
+                    <div className="pt-2 border-t border-slate-100 text-[10px] space-y-1">
+                      <div className="flex justify-between text-rose-700 font-semibold">
+                        <span>Mandatory Evidence:</span>
+                        <span>{rule?.mandatory.map(m => EVIDENCE_TYPE_LABELS[m]).join(', ') || 'Work Order'}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-500">
+                        <span>Recommended:</span>
+                        <span>{rule?.recommended.map(m => EVIDENCE_TYPE_LABELS[m]).join(', ') || 'Checklist'}</span>
+                      </div>
+                    </div>
                   </div>
-                  <p className="text-[11px] text-slate-600 leading-relaxed">
-                    Standard protocol requires strict before/after photographic documentation, pre-service inspection checklist, and work order alignment.
-                  </p>
-                  <div className="pt-2 border-t border-slate-100 flex justify-between text-[10px] text-slate-400">
-                    <span>Default Absorption: Company 100%</span>
-                    <span>Approval Authority: Operations Manager / COO</span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
       </div>
 
-      {/* DETAIL DRAWER / MODAL: SELECTED COMPLAINT INVESTIGATION (PHASE 2 COMPREHENSIVE VIEW) */}
+      {/* DETAIL DRAWER: SELECTED COMPLAINT INVESTIGATION & EVIDENCE */}
       {selectedComplaint && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl border border-slate-200 space-y-5 max-h-[90vh] overflow-y-auto animate-fadeIn">
+          <div className="bg-white rounded-2xl max-w-4xl w-full p-6 shadow-2xl border border-slate-200 space-y-5 max-h-[92vh] overflow-y-auto animate-fadeIn">
             <div className="flex justify-between items-start border-b border-slate-100 pb-3">
               <div>
                 <div className="flex items-center gap-2">
@@ -1012,9 +1453,11 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
             <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
               {[
                 { id: 'overview', label: 'Ticket Overview' },
-                { id: 'crew', label: 'Crew & Participants' },
-                { id: 'financial', label: 'Financial Loss Ledger' },
-                { id: 'actions', label: 'Investigation & Actions' },
+                { id: 'crew', label: `Crew & Statements (${selectedComplaint.participants?.length || 0})` },
+                { id: 'evidence', label: `Evidence Vault (${selectedComplaint.evidence?.length || 0})` },
+                { id: 'investigation', label: 'Root Cause Findings' },
+                { id: 'financial', label: 'Financial Ledger' },
+                { id: 'actions', label: 'Pipeline Actions' },
               ].map((t) => (
                 <button
                   key={t.id}
@@ -1033,7 +1476,6 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
             {/* TAB 1: OVERVIEW */}
             {drawerActiveTab === 'overview' && (
               <div className="space-y-4">
-                {/* Customer & Job Metadata Grid */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
                   <div>
                     <span className="text-slate-400 block text-[10px]">Customer:</span>
@@ -1056,7 +1498,6 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
                   </div>
                 </div>
 
-                {/* Description */}
                 <div className="space-y-1">
                   <span className="text-xs font-bold text-slate-700">Complaint Description:</span>
                   <p className="text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-200 leading-relaxed">
@@ -1064,7 +1505,6 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
                   </p>
                 </div>
 
-                {/* SOP Compliance Badges */}
                 <div className="space-y-1.5">
                   <span className="text-xs font-bold text-slate-700">SOP Compliance Checks:</span>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
@@ -1089,37 +1529,274 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
               </div>
             )}
 
-            {/* TAB 2: CREW & PARTICIPANTS */}
+            {/* TAB 2: CREW & STATEMENTS */}
             {drawerActiveTab === 'crew' && (
-              <div className="space-y-3">
-                <span className="text-xs font-bold text-slate-700">Employees & Crew on Job:</span>
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs font-bold text-slate-700">Employees & Crew on Job:</span>
+                  <span className="text-[11px] text-slate-400">Statements recorded under Section 4 & 5</span>
+                </div>
+
                 {(selectedComplaint.participants || []).length > 0 ? (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {selectedComplaint.participants?.map((p) => (
-                      <div key={p.id} className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex justify-between items-center text-xs">
-                        <div>
-                          <span className="font-bold text-slate-900 block">{p.employee?.fullName || 'Technician'}</span>
-                          <span className="text-[10px] text-slate-500">{p.roleOnJob} · {p.employee?.primaryPhone}</span>
+                      <div key={p.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-2 text-xs">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <span className="font-bold text-slate-900 block">{p.employee?.fullName || 'Crew Member'}</span>
+                            <span className="text-[10px] text-slate-500">{p.roleOnJob} · {p.employee?.primaryPhone}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              p.allegationStatus === 'NAMED_IN_COMPLAINT' ? 'bg-rose-100 text-rose-800' :
+                              p.allegationStatus === 'SUBSTANTIATED' ? 'bg-orange-100 text-orange-800' :
+                              p.allegationStatus === 'EXONERATED' ? 'bg-emerald-100 text-emerald-800' :
+                              'bg-slate-200 text-slate-700'
+                            }`}>
+                              {p.allegationStatus.replace(/_/g, ' ')}
+                            </span>
+                            <button
+                              onClick={() => {
+                                setRecordingStatementParticipant(p);
+                                setStatementText(p.statement || '');
+                                setAllegationStatusChoice(p.allegationStatus as any);
+                              }}
+                              className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                            >
+                              Edit Statement ✍️
+                            </button>
+                          </div>
                         </div>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                          p.allegationStatus === 'NAMED_IN_COMPLAINT' ? 'bg-rose-100 text-rose-800' :
-                          p.allegationStatus === 'SUBSTANTIATED' ? 'bg-orange-100 text-orange-800' :
-                          'bg-slate-200 text-slate-700'
-                        }`}>
-                          {p.allegationStatus.replace(/_/g, ' ')}
-                        </span>
+
+                        {p.statement ? (
+                          <div className="bg-white p-3 rounded-lg border border-slate-200 text-slate-700 leading-relaxed font-serif italic">
+                            "{p.statement}"
+                          </div>
+                        ) : (
+                          <p className="text-slate-400 italic text-[11px]">No formal statement recorded yet.</p>
+                        )}
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 text-center text-xs text-slate-400">
-                    No participants linked to this complaint yet.
+                  <div className="p-6 rounded-xl border border-slate-200 bg-slate-50 text-center text-xs text-slate-400">
+                    No crew members linked to this complaint yet.
                   </div>
                 )}
               </div>
             )}
 
-            {/* TAB 3: FINANCIAL LEDGER */}
+            {/* TAB 3: EVIDENCE VAULT */}
+            {drawerActiveTab === 'evidence' && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900">Complaint Evidence Vault</h4>
+                    <p className="text-[10px] text-slate-500">Secure private storage files for {selectedComplaint.complaintNumber}</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setTargetComplaintForUpload(selectedComplaint.id);
+                      setShowUploadEvidenceModal(true);
+                    }}
+                    className="text-xs font-bold py-1.5 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex items-center gap-1.5"
+                  >
+                    <PlusIcon className="w-3.5 h-3.5" />
+                    <span>Upload New File</span>
+                  </button>
+                </div>
+
+                {/* Category Rule Checklist for this specific complaint */}
+                {(() => {
+                  const rule = CATEGORY_EVIDENCE_RULES[selectedComplaint.category];
+                  const uploadedTypes = new Set((selectedComplaint.evidence || []).map(e => e.evidenceType));
+                  return (
+                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs space-y-1.5">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                        Category Requirements: {CATEGORY_LABELS[selectedComplaint.category]}
+                      </span>
+                      <div className="flex flex-wrap gap-2">
+                        {rule?.mandatory.map(reqType => {
+                          const hasIt = uploadedTypes.has(reqType);
+                          return (
+                            <span 
+                              key={reqType} 
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border ${
+                                hasIt ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'
+                              }`}
+                            >
+                              {hasIt ? '✓' : '⚠️ Missing'} {EVIDENCE_TYPE_LABELS[reqType]}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Evidence List */}
+                {(selectedComplaint.evidence || []).length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    {(selectedComplaint.evidence || []).map((ev) => (
+                      <div key={ev.id} className="p-3 rounded-xl border border-slate-200 bg-white space-y-2 flex flex-col justify-between shadow-sm">
+                        <div>
+                          <div className="flex justify-between items-start">
+                            <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono">
+                              {EVIDENCE_TYPE_LABELS[ev.evidenceType]}
+                            </span>
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${ev.isVerified ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                              {ev.isVerified ? '✓ Verified' : 'Unverified'}
+                            </span>
+                          </div>
+                          <h5 className="font-bold text-slate-900 mt-1">{ev.title}</h5>
+                          <p className="text-[11px] text-slate-500 mt-0.5">{ev.description || 'Uploaded file'}</p>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-[10px]">
+                          <span className="text-slate-400">{ev.uploadedByName}</span>
+                          <div className="flex gap-1.5">
+                            {ev.downloadUrl && (
+                              <button
+                                onClick={() => setPreviewingEvidence(ev)}
+                                className="font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-2 py-1 rounded"
+                              >
+                                View
+                              </button>
+                            )}
+                            {!ev.isVerified && (
+                              <button
+                                onClick={() => setVerifyingEvidenceItem({ complaintId: selectedComplaint.id, evidenceId: ev.id })}
+                                className="font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 px-2 py-1 rounded"
+                              >
+                                Verify ✓
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400 italic bg-slate-50 p-6 rounded-xl border border-slate-200 text-center">
+                    No evidence files uploaded to this complaint yet.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* TAB 4: ROOT CAUSE INVESTIGATION FINDINGS */}
+            {drawerActiveTab === 'investigation' && (
+              <form onSubmit={handleSaveInvestigation} className="space-y-4">
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-slate-800">Assigned Investigator:</span>
+                    <select
+                      value={selectedComplaint.assignedInvestigatorId || ''}
+                      onChange={(e) => {
+                        const emp = employees.find(em => em.id === e.target.value);
+                        if (emp) handleAssignInvestigator(emp.id, emp.fullName);
+                      }}
+                      className="text-xs border border-slate-300 rounded-lg p-1.5 font-bold bg-white"
+                    >
+                      <option value="">Select Investigator</option>
+                      {employees.filter(e => e.designation === 'SUPERVISOR' || e.designation === 'TEAM_LEAD' || e.designation === 'OPERATIONS_MANAGER').map(emp => (
+                        <option key={emp.id} value={emp.id}>{emp.fullName} ({emp.city})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <label className="font-semibold text-slate-700 block">Investigation Status *</label>
+                      <select
+                        value={investigationData.investigationStatus || 'IN_PROGRESS'}
+                        onChange={(e) => setInvestigationData({ ...investigationData, investigationStatus: e.target.value as any })}
+                        className="mt-1 w-full text-xs border border-slate-300 rounded-lg p-2 font-bold bg-white"
+                      >
+                        <option value="IN_PROGRESS">In Progress (Gathering Statements)</option>
+                        <option value="EVIDENCE_INSUFFICIENT">Evidence Insufficient (More Proof Required)</option>
+                        <option value="COMPLETED">Investigation Completed (Findings Finalized)</option>
+                        <option value="ESCALATED">Escalated to Operations Manager / COO</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="font-semibold text-slate-700 block">Root Cause Category *</label>
+                      <select
+                        value={investigationData.rootCauseCategory || 'EQUIPMENT_MALFUNCTION'}
+                        onChange={(e) => setInvestigationData({ ...investigationData, rootCauseCategory: e.target.value })}
+                        className="mt-1 w-full text-xs border border-slate-300 rounded-lg p-2 font-bold bg-white"
+                      >
+                        {ROOT_CAUSE_CATEGORIES.map(rc => (
+                          <option key={rc.id} value={rc.id}>{rc.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-2">
+                    <input
+                      type="checkbox"
+                      id="preExistingCheck"
+                      checked={Boolean(investigationData.isPreExistingDamage)}
+                      onChange={(e) => setInvestigationData({ ...investigationData, isPreExistingDamage: e.target.checked })}
+                      className="rounded border-slate-300 text-indigo-600"
+                    />
+                    <label htmlFor="preExistingCheck" className="text-xs font-bold text-slate-800 cursor-pointer">
+                      Pre-Existing Damage Verified (Not caused by Handy Squad service crew)
+                    </label>
+                  </div>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="font-bold text-slate-700 block">Customer Statement Summary:</label>
+                    <textarea
+                      rows={2}
+                      value={investigationData.customerStatement || ''}
+                      onChange={(e) => setInvestigationData({ ...investigationData, customerStatement: e.target.value })}
+                      placeholder="Summary of customer telephone interview or on-site statement..."
+                      className="mt-1 w-full text-xs p-2.5 border border-slate-300 rounded-xl"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 block">Equipment & Materials Condition Check:</label>
+                    <textarea
+                      rows={2}
+                      value={investigationData.equipmentStatusCheck || ''}
+                      onChange={(e) => setInvestigationData({ ...investigationData, equipmentStatusCheck: e.target.value })}
+                      placeholder="Inspection of machine pads, chemical dilution pH, vacuum suction, etc..."
+                      className="mt-1 w-full text-xs p-2.5 border border-slate-300 rounded-xl"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 block">Final Investigation Findings & Root Cause Analysis *:</label>
+                    <textarea
+                      required
+                      rows={3}
+                      value={investigationData.findingsSummary || ''}
+                      onChange={(e) => setInvestigationData({ ...investigationData, findingsSummary: e.target.value })}
+                      placeholder="Conclusive analysis of facts, evidence alignment, and technical root cause..."
+                      className="mt-1 w-full text-xs p-2.5 border border-slate-300 rounded-xl font-medium"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="submit"
+                    disabled={savingInvestigation}
+                    className="text-xs font-bold px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
+                  >
+                    {savingInvestigation ? 'Saving Findings...' : 'Save Investigation Findings'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* TAB 5: FINANCIAL LEDGER */}
             {drawerActiveTab === 'financial' && (
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
@@ -1151,7 +1828,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
               </div>
             )}
 
-            {/* TAB 4: ACTIONS & STATUS TRANSITIONS */}
+            {/* TAB 6: ACTIONS & PIPELINE */}
             {drawerActiveTab === 'actions' && (
               <div className="space-y-4">
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
@@ -1181,7 +1858,6 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
                   </div>
                 </div>
 
-                {/* Add Internal Audit Note */}
                 <form onSubmit={handleAddComment} className="space-y-2">
                   <label className="text-xs font-bold text-slate-800 block">Add Investigation Log / Decision Note:</label>
                   <textarea
@@ -1216,14 +1892,14 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
         </div>
       )}
 
-      {/* MODAL: REGISTER NEW COMPLAINT */}
+      {/* MODAL: REGISTER NEW COMPLAINT (WITH CREW & INVESTIGATOR ASSIGNMENT) */}
       {showRegisterModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 my-8">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 my-8 max-h-[92vh] overflow-y-auto animate-fadeIn">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-base font-bold text-slate-900">Register New Customer Complaint</h3>
-                <p className="text-xs text-slate-500">Record complaint details for investigation and root cause analysis</p>
+                <p className="text-xs text-slate-500">Record intake details, crew participants, and initialize case investigation</p>
               </div>
               <button
                 onClick={() => setShowRegisterModal(false)}
@@ -1261,7 +1937,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
-                  <label className="text-xs font-semibold text-slate-700 block">Kerala City *</label>
+                  <label className="text-xs font-semibold text-slate-700 block">Kerala City Hub *</label>
                   <select
                     value={newForm.city}
                     onChange={(e) => setNewForm({ ...newForm, city: e.target.value as KeralaCity })}
@@ -1297,6 +1973,47 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
                     onChange={(e) => setNewForm({ ...newForm, jobValue: Number(e.target.value) })}
                     className="mt-1 w-full text-xs border border-slate-300 rounded-lg p-2 font-bold text-slate-900"
                   />
+                </div>
+              </div>
+
+              {/* Crew & Investigator Assignment Grid */}
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Crew & Investigator Assignment ({newForm.city} Hub)</span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <label className="font-semibold text-slate-700 block">Assign Investigator</label>
+                    <select
+                      value={newForm.assignedInvestigatorName}
+                      onChange={(e) => {
+                        const emp = employees.find(em => em.fullName === e.target.value);
+                        setNewForm({
+                          ...newForm,
+                          assignedInvestigatorName: e.target.value,
+                          assignedInvestigatorId: emp ? emp.id : '',
+                        });
+                      }}
+                      className="mt-1 w-full text-xs border border-slate-300 rounded-lg p-2 font-medium bg-white"
+                    >
+                      <option value="">Pending Assignment</option>
+                      {availableSupervisors.map(s => (
+                        <option key={s.id} value={s.fullName}>{s.fullName} ({s.designation})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="font-semibold text-slate-700 block">On-Job Supervisor</label>
+                    <select
+                      value={newForm.supervisorId}
+                      onChange={(e) => setNewForm({ ...newForm, supervisorId: e.target.value })}
+                      className="mt-1 w-full text-xs border border-slate-300 rounded-lg p-2 font-medium bg-white"
+                    >
+                      <option value="">Select Supervisor</option>
+                      {availableSupervisors.map(s => (
+                        <option key={s.id} value={s.id}>{s.fullName}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               </div>
 
@@ -1352,7 +2069,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
                 />
               </div>
 
-              {/* Documentation & Evidence Checkbox Toggles */}
+              {/* SOP Documentation Verification Checkbox Toggles */}
               <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">SOP Documentation Verification</span>
                 <div className="grid grid-cols-2 gap-2 text-xs">
@@ -1412,6 +2129,259 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: UPLOAD EVIDENCE FILE */}
+      {showUploadEvidenceModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-fadeIn">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+              <h3 className="text-sm font-bold text-slate-900">Upload Evidence to Private Vault</h3>
+              <button onClick={() => setShowUploadEvidenceModal(false)} className="text-slate-400 font-bold">✕</button>
+            </div>
+
+            <form onSubmit={handleEvidenceUploadSubmit} className="space-y-3 text-xs">
+              <div>
+                <label className="font-semibold text-slate-700 block">Link to Complaint Ticket *</label>
+                <select
+                  value={targetComplaintForUpload}
+                  onChange={(e) => setTargetComplaintForUpload(e.target.value)}
+                  className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-bold bg-white"
+                >
+                  {complaints.map(c => (
+                    <option key={c.id} value={c.id}>{c.complaintNumber} - {c.customerName}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-700 block">Evidence Classification *</label>
+                <select
+                  value={uploadEvidenceForm.evidenceType}
+                  onChange={(e) => setUploadEvidenceForm({ ...uploadEvidenceForm, evidenceType: e.target.value as EvidenceType })}
+                  className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-bold bg-white"
+                >
+                  {Object.entries(EVIDENCE_TYPE_LABELS).map(([k, label]) => (
+                    <option key={k} value={k}>{label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-700 block">Evidence Title *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Master Bedroom Floor Pre-Service Inspection"
+                  value={uploadEvidenceForm.title}
+                  onChange={(e) => setUploadEvidenceForm({ ...uploadEvidenceForm, title: e.target.value })}
+                  className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-700 block">Select File (Image / PDF / Audio) *</label>
+                <input
+                  type="file"
+                  required
+                  accept="image/*,application/pdf,audio/*"
+                  onChange={handleFileInputChange}
+                  className="mt-1 w-full border border-slate-300 rounded-lg p-2 text-slate-600 bg-slate-50"
+                />
+                {uploadEvidenceForm.fileName && (
+                  <span className="text-[10px] text-emerald-600 font-bold block mt-1">
+                    ✓ Selected: {uploadEvidenceForm.fileName} ({Math.round(uploadEvidenceForm.fileSizeBytes / 1024)} KB)
+                  </span>
+                )}
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-700 block">Investigation Context & Notes</label>
+                <textarea
+                  rows={2}
+                  placeholder="Describe lighting, angle, or customer statement context..."
+                  value={uploadEvidenceForm.description}
+                  onChange={(e) => setUploadEvidenceForm({ ...uploadEvidenceForm, description: e.target.value })}
+                  className="mt-1 w-full border border-slate-300 rounded-lg p-2"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowUploadEvidenceModal(false)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={uploadingEvidence || !uploadEvidenceForm.fileName}
+                  className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-sm"
+                >
+                  {uploadingEvidence ? 'Encrypting & Storing...' : 'Upload & Encrypt'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: VERIFY EVIDENCE */}
+      {verifyingEvidenceItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 space-y-3 animate-fadeIn text-xs">
+            <h3 className="font-bold text-slate-900 text-sm">Verify Evidence Authenticity</h3>
+            <p className="text-slate-500">Record verification findings to substantiate or validate this evidence.</p>
+            <form onSubmit={handleVerifyEvidenceSubmit} className="space-y-3">
+              <div>
+                <label className="font-semibold text-slate-700 block">Verification Notes *</label>
+                <textarea
+                  required
+                  rows={3}
+                  placeholder="e.g. Verified timestamp against GPS log and customer signed quote."
+                  value={verificationNotesInput}
+                  onChange={(e) => setVerificationNotesInput(e.target.value)}
+                  className="mt-1 w-full p-2 border border-slate-300 rounded-lg"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setVerifyingEvidenceItem(null)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingVerification}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                >
+                  {submittingVerification ? 'Verifying...' : 'Confirm Verification ✓'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: RECORD PARTICIPANT STATEMENT */}
+      {recordingStatementParticipant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-fadeIn text-xs">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Record Employee Statement</h3>
+                <span className="text-[11px] text-slate-500 font-medium">
+                  {recordingStatementParticipant.employee?.fullName} ({recordingStatementParticipant.roleOnJob})
+                </span>
+              </div>
+              <button onClick={() => setRecordingStatementParticipant(null)} className="text-slate-400 font-bold">✕</button>
+            </div>
+
+            <form onSubmit={handleSaveParticipantStatement} className="space-y-3">
+              <div>
+                <label className="font-semibold text-slate-700 block">Allegation / Case Role Status</label>
+                <select
+                  value={allegationStatusChoice}
+                  onChange={(e) => setAllegationStatusChoice(e.target.value as any)}
+                  className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-bold bg-white"
+                >
+                  <option value="PARTICIPANT">Participant (General on-site crew member)</option>
+                  <option value="NAMED_IN_COMPLAINT">Named in Complaint (Direct customer allegation)</option>
+                  <option value="EXONERATED">Exonerated (Evidence proves no fault / protocol followed)</option>
+                  <option value="SUBSTANTIATED">Substantiated (Lapse or skill gap confirmed)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-700 block">Formal Written Statement *</label>
+                <textarea
+                  required
+                  rows={4}
+                  placeholder="Record employee's account of events, chemicals utilized, machinery settings, or pre-existing conditions..."
+                  value={statementText}
+                  onChange={(e) => setStatementText(e.target.value)}
+                  className="mt-1 w-full p-2.5 border border-slate-300 rounded-xl font-medium"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setRecordingStatementParticipant(null)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingStatement || !statementText.trim()}
+                  className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
+                >
+                  {savingStatement ? 'Saving...' : 'Save Statement to Case File'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: PREVIEW EVIDENCE */}
+      {previewingEvidence && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-fadeIn">
+            <div className="flex justify-between items-start border-b border-slate-100 pb-2">
+              <div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono">
+                  {EVIDENCE_TYPE_LABELS[previewingEvidence.evidenceType]}
+                </span>
+                <h3 className="text-sm font-bold text-slate-900 mt-1">{previewingEvidence.title}</h3>
+              </div>
+              <button onClick={() => setPreviewingEvidence(null)} className="text-slate-400 font-bold">✕</button>
+            </div>
+
+            <div className="bg-slate-100 rounded-xl overflow-hidden flex items-center justify-center min-h-[250px] max-h-[450px]">
+              {previewingEvidence.mimeType.startsWith('image/') && previewingEvidence.downloadUrl ? (
+                <img src={previewingEvidence.downloadUrl} alt={previewingEvidence.title} className="max-h-[450px] w-auto object-contain" />
+              ) : previewingEvidence.mimeType.startsWith('audio/') && previewingEvidence.downloadUrl ? (
+                <div className="p-6 text-center space-y-3">
+                  <span className="text-4xl block">🎙️</span>
+                  <audio controls className="w-full">
+                    <source src={previewingEvidence.downloadUrl} type={previewingEvidence.mimeType} />
+                    Your browser does not support audio playback.
+                  </audio>
+                </div>
+              ) : (
+                <div className="p-8 text-center space-y-3">
+                  <FileTextIcon className="w-12 h-12 text-slate-400 mx-auto" />
+                  <p className="text-xs text-slate-600">Document preview ({previewingEvidence.fileName})</p>
+                  {previewingEvidence.downloadUrl && (
+                    <a
+                      href={previewingEvidence.downloadUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-block text-xs font-bold px-4 py-2 rounded-lg bg-indigo-600 text-white"
+                    >
+                      Open Private Document in Secure Tab ↗
+                    </a>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="text-xs text-slate-500 flex justify-between items-center pt-2 border-t border-slate-100">
+              <span>Uploaded by {previewingEvidence.uploadedByName}</span>
+              <button
+                onClick={() => setPreviewingEvidence(null)}
+                className="text-xs font-bold px-4 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700"
+              >
+                Close Preview
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -1,5 +1,5 @@
 // src/lib/complaintsService.ts
-// HANDY SQUAD: COMPLAINT MANAGEMENT PLATFORM (SERVICE LAYER)
+// HANDY SQUAD: COMPLAINT MANAGEMENT PLATFORM (SERVICE LAYER - PHASE 3 ENHANCED)
 
 import { supabase } from './supabase';
 import { 
@@ -13,13 +13,76 @@ import {
   ResponsibilityAssessment, 
   ApprovalRecord, 
   ComplaintComment,
+  ComplaintParticipant,
+  InvestigationRecord,
   ComplaintCategory,
   ComplaintSeverity,
-  ComplaintStatus
+  ComplaintStatus,
+  EvidenceType
 } from '../types/complaints';
 
+// Category Mandatory & Recommended Evidence Rules per Engineering Spec (Section 6 & 7)
+export interface CategoryEvidenceRule {
+  mandatory: EvidenceType[];
+  recommended: EvidenceType[];
+  complianceWarning: string;
+}
+
+export const CATEGORY_EVIDENCE_RULES: Record<ComplaintCategory, CategoryEvidenceRule> = {
+  DAMAGE_ISSUE: {
+    mandatory: ['BEFORE_PHOTO', 'AFTER_PHOTO', 'CHECKLIST'],
+    recommended: ['DAMAGE_ASSESSMENT', 'WORK_ORDER'],
+    complianceWarning: 'Surface / Property Damage requires Pre-Service Checklist and Before Photos to determine pre-existing defects.',
+  },
+  SKILL_ISSUE: {
+    mandatory: ['BEFORE_PHOTO', 'AFTER_PHOTO'],
+    recommended: ['TRAINING_RECORD', 'WORK_ORDER'],
+    complianceWarning: 'Workmanship issues require After Photos and technician training verification.',
+  },
+  SCOPE_CONFUSION: {
+    mandatory: ['WORK_ORDER', 'CUSTOMER_COMMUNICATION'],
+    recommended: ['SCOPE_CHANGE', 'CHECKLIST'],
+    complianceWarning: 'Scope confusion requires original signed Work Order and Customer Chat/Communication records.',
+  },
+  SCOPE_MISSED: {
+    mandatory: ['WORK_ORDER', 'CHECKLIST', 'AFTER_PHOTO'],
+    recommended: ['COMPLETION_SIGNOFF'],
+    complianceWarning: 'Missed areas require Checklist verification and completion signoff audit.',
+  },
+  MACHINE_ISSUE: {
+    mandatory: ['MAINTENANCE_RECORD'],
+    recommended: ['DAMAGE_ASSESSMENT', 'AFTER_PHOTO'],
+    complianceWarning: 'Equipment failure requires machine maintenance log and servicing history.',
+  },
+  LATE_START: {
+    mandatory: ['WORK_ORDER', 'CUSTOMER_COMMUNICATION'],
+    recommended: ['OTHER_DOCUMENT'],
+    complianceWarning: 'Late arrival requires customer arrival time notification and transit logs.',
+  },
+  LATE_COMPLETION: {
+    mandatory: ['WORK_ORDER', 'COMPLETION_SIGNOFF'],
+    recommended: ['CUSTOMER_COMMUNICATION'],
+    complianceWarning: 'Overrun requires job departure signoff and technician log.',
+  },
+  PROCESS_ISSUE: {
+    mandatory: ['CHECKLIST', 'COMPLETION_SIGNOFF'],
+    recommended: ['WORK_ORDER'],
+    complianceWarning: 'Protocol lapses require SOP checklist and supervisor signoff.',
+  },
+  CUSTOMER_EXPERIENCE: {
+    mandatory: ['CUSTOMER_COMMUNICATION'],
+    recommended: ['AUDIO_RECORDING', 'WORK_ORDER'],
+    complianceWarning: 'Staff demeanor complaints require recorded customer audio or message transcript.',
+  },
+  COMPANY_GOODWILL_DECISION: {
+    mandatory: ['CUSTOMER_COMMUNICATION', 'WORK_ORDER'],
+    recommended: ['COMPLETION_SIGNOFF'],
+    complianceWarning: 'Goodwill absorption requires documented rationale and work order confirmation.',
+  },
+};
+
 // Fallback seed complaints for immediate UI verification & testing
-const FALLBACK_SEED_COMPLAINTS: Complaint[] = [
+export const FALLBACK_SEED_COMPLAINTS: Complaint[] = [
   {
     id: 'a1b2c3d4-0001-4000-8000-000000000001',
     complaintNumber: 'HS-CMP-202610-1001',
@@ -46,6 +109,101 @@ const FALLBACK_SEED_COMPLAINTS: Complaint[] = [
     workOrderVerified: true,
     createdAt: new Date(Date.now() - 3 * 86400000).toISOString(),
     updatedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+    participants: [
+      {
+        id: 'part-1',
+        complaintId: 'a1b2c3d4-0001-4000-8000-000000000001',
+        employeeId: 'emp-101',
+        roleOnJob: 'SUPERVISOR',
+        statement: 'Pre-inspection showed light etch marks near balcony threshold, but master bedroom centre was unblemished. White pad 3M was assigned; technician may have swapped for red pad without signoff.',
+        allegationStatus: 'PARTICIPANT',
+        createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+        employee: {
+          id: 'emp-101',
+          employeeCode: 'HS-EMP-101',
+          fullName: 'Govindan Nair',
+          designation: 'SUPERVISOR',
+          city: 'Kochi',
+          primaryPhone: '+91 98470 11223',
+          hireDate: '2023-01-15',
+          status: 'ACTIVE',
+          trainingStatus: 'UP_TO_DATE',
+          createdAt: '',
+          updatedAt: ''
+        }
+      },
+      {
+        id: 'part-2',
+        complaintId: 'a1b2c3d4-0001-4000-8000-000000000001',
+        employeeId: 'emp-102',
+        roleOnJob: 'PRIMARY_TECHNICIAN',
+        statement: 'Floor had embedded grout dust. I utilized neutral cleaner Taski R2. Buffer was operated at standard RPM. Circular marks became visible once floor dried under downlights.',
+        allegationStatus: 'NAMED_IN_COMPLAINT',
+        createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+        employee: {
+          id: 'emp-102',
+          employeeCode: 'HS-EMP-102',
+          fullName: 'Pradeep Kumar K.',
+          designation: 'SENIOR_TECHNICIAN',
+          city: 'Kochi',
+          primaryPhone: '+91 94471 22334',
+          hireDate: '2023-03-20',
+          status: 'ACTIVE',
+          trainingStatus: 'UP_TO_DATE',
+          createdAt: '',
+          updatedAt: ''
+        }
+      }
+    ],
+    evidence: [
+      {
+        id: 'ev-1',
+        complaintId: 'a1b2c3d4-0001-4000-8000-000000000001',
+        evidenceType: 'BEFORE_PHOTO',
+        title: 'Master Bedroom Marble - Initial State',
+        description: 'Captured at 09:15 AM before cleaning commenced. Shows surface reflection with minor dusting.',
+        storagePath: 'complaints/HS-CMP-202610-1001/before_master_bedroom.jpg',
+        fileName: 'before_master_bedroom.jpg',
+        fileSizeBytes: 2450000,
+        mimeType: 'image/jpeg',
+        uploadedByName: 'Govindan Nair (Supervisor)',
+        isVerified: true,
+        verificationNotes: 'Verified time metadata matches work order start window.',
+        createdAt: new Date(Date.now() - 3 * 86400000).toISOString(),
+        downloadUrl: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80',
+      },
+      {
+        id: 'ev-2',
+        complaintId: 'a1b2c3d4-0001-4000-8000-000000000001',
+        evidenceType: 'AFTER_PHOTO',
+        title: 'Master Bedroom Swirl Marks Under Downlight',
+        description: 'Close-up photo under 3000K warm downlight displaying circular buffer swirls.',
+        storagePath: 'complaints/HS-CMP-202610-1001/after_swirl_marks.jpg',
+        fileName: 'after_swirl_marks.jpg',
+        fileSizeBytes: 3120000,
+        mimeType: 'image/jpeg',
+        uploadedByName: 'Ashish Roy',
+        isVerified: true,
+        verificationNotes: 'High-resolution photo confirms surface swirl marks.',
+        createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+        downloadUrl: 'https://images.unsplash.com/photo-1581858726788-75bc0f6a952d?auto=format&fit=crop&w=800&q=80',
+      },
+      {
+        id: 'ev-3',
+        complaintId: 'a1b2c3d4-0001-4000-8000-000000000001',
+        evidenceType: 'CHECKLIST',
+        title: 'Signed Pre-Service Checklist',
+        description: 'Physical checklist with customer acknowledgement of pre-existing balcony floor marks.',
+        storagePath: 'complaints/HS-CMP-202610-1001/preservice_checklist.pdf',
+        fileName: 'preservice_checklist.pdf',
+        fileSizeBytes: 820000,
+        mimeType: 'application/pdf',
+        uploadedByName: 'Govindan Nair',
+        isVerified: true,
+        verificationNotes: 'Customer initials present on page 2.',
+        createdAt: new Date(Date.now() - 3 * 86400000).toISOString(),
+      }
+    ],
     costs: [
       {
         id: 'cost-1',
@@ -88,6 +246,49 @@ const FALLBACK_SEED_COMPLAINTS: Complaint[] = [
     workOrderVerified: true,
     createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
     updatedAt: new Date(Date.now() - 1 * 86400000).toISOString(),
+    participants: [
+      {
+        id: 'part-3',
+        complaintId: 'a1b2c3d4-0002-4000-8000-000000000002',
+        employeeId: 'emp-105',
+        roleOnJob: 'SUPERVISOR',
+        statement: 'Monsoon humidity was at 88% on job day. Extra vacuum pass was recommended but blower was packed up prematurely.',
+        allegationStatus: 'PARTICIPANT',
+        createdAt: new Date().toISOString(),
+      }
+    ],
+    evidence: [
+      {
+        id: 'ev-4',
+        complaintId: 'a1b2c3d4-0002-4000-8000-000000000002',
+        evidenceType: 'AFTER_PHOTO',
+        title: 'Sectional Sofa Finished State',
+        description: 'Post-service photo showing fabric color uniformity.',
+        storagePath: 'complaints/HS-CMP-202610-1002/sofa_finish.jpg',
+        fileName: 'sofa_finish.jpg',
+        fileSizeBytes: 1840000,
+        mimeType: 'image/jpeg',
+        uploadedByName: 'Jayan Varghese',
+        isVerified: true,
+        createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+        downloadUrl: 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=800&q=80',
+      },
+      {
+        id: 'ev-5',
+        complaintId: 'a1b2c3d4-0002-4000-8000-000000000002',
+        evidenceType: 'CUSTOMER_COMMUNICATION',
+        title: 'Customer Voice Note Regarding Odor',
+        description: 'Audio message from Mrs. Amina explaining dampness on seat cushion.',
+        storagePath: 'complaints/HS-CMP-202610-1002/customer_audio_rework.mp3',
+        fileName: 'customer_audio_rework.mp3',
+        fileSizeBytes: 950000,
+        mimeType: 'audio/mpeg',
+        uploadedByName: 'Deepa Pillai',
+        isVerified: true,
+        verificationNotes: 'Reviewed audio recording; customer polite and requesting second pass.',
+        createdAt: new Date(Date.now() - 1 * 86400000).toISOString(),
+      }
+    ],
     costs: [
       {
         id: 'cost-2',
@@ -130,6 +331,22 @@ const FALLBACK_SEED_COMPLAINTS: Complaint[] = [
     workOrderVerified: true,
     createdAt: new Date(Date.now() - 1 * 86400000).toISOString(),
     updatedAt: new Date().toISOString(),
+    evidence: [
+      {
+        id: 'ev-6',
+        complaintId: 'a1b2c3d4-0003-4000-8000-000000000003',
+        evidenceType: 'WORK_ORDER',
+        title: 'Original Dispatch Booking Slip',
+        description: 'Confirmed scheduled arrival 09:00 AM Kozhikode.',
+        storagePath: 'complaints/HS-CMP-202610-1003/booking_order.pdf',
+        fileName: 'booking_order.pdf',
+        fileSizeBytes: 420000,
+        mimeType: 'application/pdf',
+        uploadedByName: 'Ramesh Nair',
+        isVerified: true,
+        createdAt: new Date().toISOString(),
+      }
+    ],
     costs: [
       {
         id: 'cost-3',
@@ -172,10 +389,28 @@ const FALLBACK_SEED_COMPLAINTS: Complaint[] = [
     workOrderVerified: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    evidence: [
+      {
+        id: 'ev-7',
+        complaintId: 'a1b2c3d4-0004-4000-8000-000000000004',
+        evidenceType: 'BEFORE_PHOTO',
+        title: 'Initial Kitchen State Before Degreasing',
+        description: 'Shows kitchen prep area and cabinets before work started.',
+        storagePath: 'complaints/HS-CMP-202610-1004/before_kitchen.jpg',
+        fileName: 'before_kitchen.jpg',
+        fileSizeBytes: 2100000,
+        mimeType: 'image/jpeg',
+        uploadedByName: 'Naveen Rajan',
+        isVerified: false,
+        createdAt: new Date().toISOString(),
+        downloadUrl: 'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=800&q=80',
+      }
+    ],
+    costs: []
   }
 ];
 
-const FALLBACK_SEED_EMPLOYEES: Employee[] = [
+export const FALLBACK_SEED_EMPLOYEES: Employee[] = [
   { id: 'emp-101', employeeCode: 'HS-EMP-101', fullName: 'Govindan Nair', designation: 'SUPERVISOR', city: 'Kochi', primaryPhone: '+91 98470 11223', hireDate: '2023-01-15', status: 'ACTIVE', trainingStatus: 'UP_TO_DATE', createdAt: '', updatedAt: '' },
   { id: 'emp-102', employeeCode: 'HS-EMP-102', fullName: 'Pradeep Kumar K.', designation: 'SENIOR_TECHNICIAN', city: 'Kochi', primaryPhone: '+91 94471 22334', hireDate: '2023-03-20', status: 'ACTIVE', trainingStatus: 'UP_TO_DATE', createdAt: '', updatedAt: '' },
   { id: 'emp-103', employeeCode: 'HS-EMP-103', fullName: 'Anas Mohammed', designation: 'TECHNICIAN', city: 'Kochi', primaryPhone: '+91 97460 33445', hireDate: '2023-06-10', status: 'ACTIVE', trainingStatus: 'TRAINING_REQUIRED', createdAt: '', updatedAt: '' },
@@ -286,7 +521,7 @@ export async function fetchEmployees(city?: string): Promise<Employee[]> {
   if (supabase) {
     try {
       let query = supabase.from('employees').select('*').order('full_name', { ascending: true });
-      if (city && city !== 'All_Kerala') {
+      if (city && city !== 'All_Kerala' && city !== 'ALL') {
         query = query.eq('city', city);
       }
       const { data, error } = await query;
@@ -309,7 +544,11 @@ export async function fetchEmployees(city?: string): Promise<Employee[]> {
       console.warn('Supabase fetchEmployees error:', err);
     }
   }
-  return FALLBACK_SEED_EMPLOYEES;
+  let emps = [...FALLBACK_SEED_EMPLOYEES];
+  if (city && city !== 'All_Kerala' && city !== 'ALL') {
+    emps = emps.filter(e => e.city === city);
+  }
+  return emps;
 }
 
 export async function computeComplaintDashboardSummary(complaints: Complaint[]): Promise<ComplaintDashboardSummary> {
@@ -539,6 +778,179 @@ export async function addComplaintComment(id: string, comment: { authorName: str
   }
 }
 
+// Fetch Evidence for specific complaint
+export async function fetchComplaintEvidence(complaintId: string): Promise<ComplaintEvidence[]> {
+  try {
+    const res = await fetch(`/api/complaints/${complaintId}/evidence`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.evidence) && data.evidence.length > 0) {
+        return data.evidence;
+      }
+    }
+  } catch (err) {
+    console.warn('fetchComplaintEvidence api error:', err);
+  }
+
+  // Fallback to seed complaint evidence
+  const seed = FALLBACK_SEED_COMPLAINTS.find(c => c.id === complaintId);
+  return seed?.evidence || [];
+}
+
+// Upload Evidence file
+export async function uploadComplaintEvidence(
+  complaintId: string,
+  payload: {
+    evidenceType: EvidenceType;
+    title: string;
+    description?: string;
+    fileName: string;
+    fileSizeBytes: number;
+    mimeType: string;
+    uploadedByName: string;
+    fileBase64?: string;
+  }
+): Promise<ComplaintEvidence | null> {
+  try {
+    const res = await fetch(`/api/complaints/${complaintId}/evidence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.evidence || null;
+    }
+  } catch (err) {
+    console.error('uploadComplaintEvidence error:', err);
+  }
+  return null;
+}
+
+// Verify Evidence Item
+export async function verifyComplaintEvidence(
+  complaintId: string,
+  evidenceId: string,
+  isVerified: boolean,
+  notes?: string,
+  verifiedByName?: string
+): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/complaints/${complaintId}/evidence`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        evidenceId,
+        isVerified,
+        verificationNotes: notes,
+        verifiedByName: verifiedByName || 'Operations Manager',
+      }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('verifyComplaintEvidence error:', err);
+    return false;
+  }
+}
+
+// Fetch Investigation Record
+export async function fetchInvestigationRecord(complaintId: string): Promise<InvestigationRecord | null> {
+  try {
+    const res = await fetch(`/api/complaints/${complaintId}/investigation`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.investigation) return data.investigation;
+    }
+  } catch (err) {
+    console.warn('fetchInvestigationRecord error:', err);
+  }
+
+  // Fallback mock investigation for first seed complaint
+  if (complaintId === 'a1b2c3d4-0001-4000-8000-000000000001') {
+    return {
+      id: 'inv-101',
+      complaintId: 'a1b2c3d4-0001-4000-8000-000000000001',
+      investigatorId: 'emp-101',
+      investigatorName: 'Govindan Nair (Ops Lead)',
+      investigationStatus: 'IN_PROGRESS',
+      customerStatement: 'Customer observed haze and circular swirl marks after floor scrubbing dried in master bedroom. States floor had high gloss prior to service.',
+      supervisorStatement: 'Pre-service walkthrough was conducted. Balcony threshold had prior stains, but master bedroom floor had no documented circular abrasive swirls.',
+      technicianStatements: 'Senior technician Pradeep used Taski R2 and single-disc machine. States standard white pad was requested, but buffer machine pad holder may have had trapped grit.',
+      equipmentStatusCheck: 'Single disc machine #4 inspected. Driver disc rubber grip had debris particles embedded.',
+      materialsUsedCheck: 'Taski R2 (Neutral cleaner) verified pH 7.2. Chemical is safe for marble; damage is mechanical abrasion, not acid burn.',
+      arrivalDepartureVerification: 'Arrived 09:12 AM, departed 05:40 PM. Verified via GPS tracking.',
+      rootCauseAnalysis: 'Mechanical abrasive friction from trapped grit on scrubbing disc holder caused micro-scratching on Italian marble surface layer.',
+      rootCauseCategory: 'EQUIPMENT_MALFUNCTION',
+      isPreExistingDamage: false,
+      missingEvidenceFlags: [],
+      findingsSummary: 'Physical damage confirmed caused during single-disc scrubbing due to grit accumulation on machine head. Diamond pad crystallization required to restore gloss.',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  return null;
+}
+
+// Save or Update Investigation Record
+export async function saveInvestigationRecord(
+  complaintId: string,
+  record: Partial<InvestigationRecord>
+): Promise<InvestigationRecord | null> {
+  try {
+    const res = await fetch(`/api/complaints/${complaintId}/investigation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(record),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.investigation || null;
+    }
+  } catch (err) {
+    console.error('saveInvestigationRecord error:', err);
+  }
+  return null;
+}
+
+// Add Crew Participant
+export async function addComplaintParticipant(
+  complaintId: string,
+  participant: { employeeId: string; roleOnJob: string; statement?: string }
+): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/complaints/${complaintId}/participants`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(participant),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('addComplaintParticipant error:', err);
+    return false;
+  }
+}
+
+// Update Participant Statement
+export async function updateParticipantStatement(
+  complaintId: string,
+  participantId: string,
+  statement: string,
+  allegationStatus?: string
+): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/complaints/${complaintId}/participants`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ participantId, statement, allegationStatus }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('updateParticipantStatement error:', err);
+    return false;
+  }
+}
+
 export function exportComplaintsToCSV(complaints: Complaint[]) {
   const headers = [
     'Complaint Number',
@@ -588,4 +1000,3 @@ export function exportComplaintsToCSV(complaints: Complaint[]) {
   link.click();
   document.body.removeChild(link);
 }
-

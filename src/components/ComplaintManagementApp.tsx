@@ -42,7 +42,14 @@ import {
   AssessmentStatus,
   CorrectiveAction,
   CorrectiveActionType,
-  CorrectiveActionStatus
+  CorrectiveActionStatus,
+  CostRecord,
+  ApprovalRecord,
+  TrainingRecord,
+  CostType,
+  CostStatus,
+  ApprovalType,
+  ApprovalDecision
 } from '../types/complaints';
 import { 
   fetchComplaints, 
@@ -64,6 +71,14 @@ import {
   fetchCorrectiveActions,
   createCorrectiveAction,
   updateCorrectiveActionStatus,
+  fetchComplaintCosts,
+  addComplaintCost,
+  verifyComplaintCost,
+  fetchComplaintApprovals,
+  submitApprovalDecision,
+  fetchEmployeeTrainingRecords,
+  assignEmployeeTraining,
+  completeEmployeeTraining,
   CATEGORY_EVIDENCE_RULES
 } from '../lib/complaintsService';
 import { formatINR } from '../lib/finance';
@@ -191,7 +206,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
 
   // Selected Complaint for Deep Inspection Drawer
   const [selectedComplaint, setSelectedComplaint] = useState<Complaint | null>(null);
-  const [drawerActiveTab, setDrawerActiveTab] = useState<'overview' | 'crew' | 'evidence' | 'investigation' | 'assessment' | 'corrective' | 'financial' | 'actions'>('overview');
+  const [drawerActiveTab, setDrawerActiveTab] = useState<'overview' | 'crew' | 'evidence' | 'investigation' | 'assessment' | 'corrective' | 'financial' | 'approvals' | 'actions'>('overview');
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [newCommentText, setNewCommentText] = useState('');
   const [commentSubmitting, setCommentSubmitting] = useState(false);
@@ -318,6 +333,85 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     workOrderVerified: true,
   });
 
+  // ==========================================
+  // PHASE 5: EXECUTIVE APPROVALS STATE
+  // ==========================================
+  const [complaintApprovalsList, setComplaintApprovalsList] = useState<ApprovalRecord[]>([]);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [targetComplaintForApproval, setTargetComplaintForApproval] = useState<Complaint | null>(null);
+  const [approvalDecisionForm, setApprovalDecisionForm] = useState<{
+    approvalType: ApprovalType;
+    approverRole: 'OPERATIONS_MANAGER' | 'COO' | 'MANAGEMENT_ADMIN';
+    approverName: string;
+    decision: ApprovalDecision;
+    comments: string;
+    conditions: string;
+    financialAmountApproved: number;
+  }>({
+    approvalType: 'RESPONSIBILITY_ASSESSMENT',
+    approverRole: 'OPERATIONS_MANAGER',
+    approverName: 'Harikrishnan Menon (Operations Manager)',
+    decision: 'APPROVED',
+    comments: '',
+    conditions: '',
+    financialAmountApproved: 0,
+  });
+  const [submittingApproval, setSubmittingApproval] = useState(false);
+  const [approvalsRoleFilter, setApprovalsRoleFilter] = useState<'ALL' | 'OPERATIONS_MANAGER' | 'COO' | 'MANAGEMENT_ADMIN'>('ALL');
+
+  // ==========================================
+  // PHASE 5: FINANCIAL LEDGER & EXPENSES STATE
+  // ==========================================
+  const [complaintCostsList, setComplaintCostsList] = useState<CostRecord[]>([]);
+  const [showAddCostModal, setShowAddCostModal] = useState(false);
+  const [targetComplaintForCost, setTargetComplaintForCost] = useState<string>('');
+  const [costForm, setCostForm] = useState<{
+    costType: CostType;
+    description: string;
+    amount: number;
+    status: CostStatus;
+    vendorName: string;
+    invoiceReceiptRef: string;
+    isCompanyAbsorption: boolean;
+    proposedEmployeeShare: number;
+  }>({
+    costType: 'REWORK_LABOUR',
+    description: '',
+    amount: 1500,
+    status: 'ESTIMATED',
+    vendorName: '',
+    invoiceReceiptRef: '',
+    isCompanyAbsorption: true,
+    proposedEmployeeShare: 0,
+  });
+  const [submittingCost, setSubmittingCost] = useState(false);
+  const [costTypeFilter, setCostTypeFilter] = useState<string>('ALL');
+  const [costStatusFilter, setCostStatusFilter] = useState<string>('ALL');
+
+  // ==========================================
+  // PHASE 5: EMPLOYEE COACHING & CAREER DOSSIER
+  // ==========================================
+  const [selectedEmployeeForDetail, setSelectedEmployeeForDetail] = useState<Employee | null>(null);
+  const [employeeTrainingList, setEmployeeTrainingList] = useState<TrainingRecord[]>([]);
+  const [loadingTraining, setLoadingTraining] = useState(false);
+  const [showAssignTrainingModal, setShowAssignTrainingModal] = useState(false);
+  const [assignTrainingForm, setAssignTrainingForm] = useState<{
+    moduleCode: string;
+    moduleTitle: string;
+    category: string;
+    trainerName: string;
+    scheduledDate: string;
+    notes: string;
+  }>({
+    moduleCode: 'SOP-DEL-01',
+    moduleTitle: 'Natural Stone & Acid-Sensitive Surface Protection',
+    category: 'DELICATE_SURFACES',
+    trainerName: 'Govindan Nair (Master Trainer)',
+    scheduledDate: new Date().toISOString().split('T')[0],
+    notes: '',
+  });
+  const [submittingTraining, setSubmittingTraining] = useState(false);
+
   // Load Complaints & Employees
   useEffect(() => {
     async function loadData() {
@@ -346,16 +440,18 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     loadData();
   }, [selectedCity, selectedCategory, selectedSeverity, selectedStatus, searchQuery]);
 
-  // Load Investigation, Evidence, Assessments, and Corrective Actions for Selected Complaint
+  // Load Investigation, Evidence, Assessments, Corrective Actions, Costs, and Approvals for Selected Complaint
   useEffect(() => {
     if (!selectedComplaint) return;
     async function loadDetails() {
       try {
-        const [inv, evList, asList, caList] = await Promise.all([
+        const [inv, evList, asList, caList, costList, appList] = await Promise.all([
           fetchInvestigationRecord(selectedComplaint!.id),
           fetchComplaintEvidence(selectedComplaint!.id),
           fetchComplaintAssessments(selectedComplaint!.id),
           fetchCorrectiveActions(selectedComplaint!.id),
+          fetchComplaintCosts(selectedComplaint!.id),
+          fetchComplaintApprovals(selectedComplaint!.id),
         ]);
         if (inv) {
           setInvestigationData(inv);
@@ -379,12 +475,34 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
         }
         setAssessmentsList(asList || []);
         setCorrectiveActionsList(caList || []);
+        setComplaintCostsList(costList || []);
+        setComplaintApprovalsList(appList || []);
       } catch (err) {
         console.warn('Error loading complaint details:', err);
       }
     }
     loadDetails();
   }, [selectedComplaint?.id]);
+
+  // Load Training Records when Employee Selected
+  useEffect(() => {
+    if (!selectedEmployeeForDetail) {
+      setEmployeeTrainingList([]);
+      return;
+    }
+    async function loadTraining() {
+      setLoadingTraining(true);
+      try {
+        const records = await fetchEmployeeTrainingRecords(selectedEmployeeForDetail!.id);
+        setEmployeeTrainingList(records);
+      } catch (err) {
+        console.warn('Error loading employee training records:', err);
+      } finally {
+        setLoadingTraining(false);
+      }
+    }
+    loadTraining();
+  }, [selectedEmployeeForDetail?.id]);
 
   // City-filtered Employees for dropdowns
   const availableSupervisors = useMemo(() => {
@@ -888,6 +1006,217 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
       }
     } finally {
       setCommentSubmitting(false);
+    }
+  };
+
+  // ==========================================
+  // PHASE 5: APPROVAL HANDLERS
+  // ==========================================
+  const handleOpenApprovalModal = (complaint: Complaint) => {
+    setTargetComplaintForApproval(complaint);
+    const totalCost = (complaint.costs || []).reduce((acc, c) => acc + c.amount, 0);
+    let role: 'OPERATIONS_MANAGER' | 'COO' | 'MANAGEMENT_ADMIN' = 'OPERATIONS_MANAGER';
+    if (totalCost > 15000) {
+      role = 'MANAGEMENT_ADMIN';
+    } else if (totalCost >= 5000) {
+      role = 'COO';
+    }
+
+    setApprovalDecisionForm({
+      approvalType: 'RESPONSIBILITY_ASSESSMENT',
+      approverRole: role,
+      approverName: role === 'OPERATIONS_MANAGER' 
+        ? 'Harikrishnan Menon (Operations Manager)' 
+        : role === 'COO' 
+          ? 'Suresh Kurup (Chief Operating Officer)' 
+          : 'Director of Operations (Management Admin)',
+      decision: 'APPROVED',
+      comments: `Executive review completed for ${complaint.complaintNumber}. Evidence and responsibility findings ratified.`,
+      conditions: totalCost > 5000 ? 'Supervisor must verify client signoff post-rectification' : '',
+      financialAmountApproved: totalCost,
+    });
+    setShowApprovalModal(true);
+  };
+
+  const handleSubmitApproval = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!targetComplaintForApproval) return;
+    setSubmittingApproval(true);
+    try {
+      const result = await submitApprovalDecision(targetComplaintForApproval.id, approvalDecisionForm);
+      if (result && result.approval) {
+        const nextStatus = (result.nextStatus as ComplaintStatus) || targetComplaintForApproval.status;
+        const updated = {
+          ...targetComplaintForApproval,
+          status: nextStatus,
+        };
+        setComplaints(prev => prev.map(c => c.id === targetComplaintForApproval.id ? updated : c));
+        if (selectedComplaint?.id === targetComplaintForApproval.id) {
+          setSelectedComplaint(updated);
+          setComplaintApprovalsList(prev => [result.approval, ...prev]);
+        }
+        setShowApprovalModal(false);
+        const summ = await computeComplaintDashboardSummary(
+          complaints.map(c => c.id === targetComplaintForApproval.id ? updated : c)
+        );
+        setSummary(summ);
+        alert(`Approval decision [${approvalDecisionForm.decision}] recorded successfully! Ticket status updated to ${nextStatus}.`);
+      }
+    } catch (err) {
+      console.error('Error submitting approval:', err);
+      alert('Failed to record approval decision.');
+    } finally {
+      setSubmittingApproval(false);
+    }
+  };
+
+  // ==========================================
+  // PHASE 5: COST & EXPENSE HANDLERS
+  // ==========================================
+  const handleOpenAddCostModal = (complaintId?: string) => {
+    setTargetComplaintForCost(complaintId || selectedComplaint?.id || complaints[0]?.id || '');
+    setCostForm({
+      costType: 'REWORK_LABOUR',
+      description: 'Secondary rework crew labour cost for rectification visit',
+      amount: 1500,
+      status: 'ESTIMATED',
+      vendorName: 'Handy Squad Direct Ops',
+      invoiceReceiptRef: `REC-${Date.now().toString().slice(-6)}`,
+      isCompanyAbsorption: true,
+      proposedEmployeeShare: 0,
+    });
+    setShowAddCostModal(true);
+  };
+
+  const handleSubmitCost = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!targetComplaintForCost) return;
+    setSubmittingCost(true);
+    try {
+      const newCost = await addComplaintCost(targetComplaintForCost, costForm);
+      if (newCost) {
+        const updatedComplaints = complaints.map(c => {
+          if (c.id === targetComplaintForCost) {
+            return {
+              ...c,
+              costs: [newCost, ...(c.costs || [])],
+            };
+          }
+          return c;
+        });
+        setComplaints(updatedComplaints);
+        if (selectedComplaint?.id === targetComplaintForCost) {
+          setSelectedComplaint(prev => prev ? { ...prev, costs: [newCost, ...(prev.costs || [])] } : null);
+          setComplaintCostsList(prev => [newCost, ...prev]);
+        }
+        setShowAddCostModal(false);
+        const summ = await computeComplaintDashboardSummary(updatedComplaints);
+        setSummary(summ);
+        alert('Expense record booked successfully into complaint financial ledger!');
+      }
+    } catch (err) {
+      console.error('Error adding cost:', err);
+      alert('Failed to add cost record.');
+    } finally {
+      setSubmittingCost(false);
+    }
+  };
+
+  const handleVerifyCost = async (complaintId: string, costId: string) => {
+    try {
+      const ok = await verifyComplaintCost(complaintId, costId, 'VERIFIED_INCURRED', 0, 'Operations Manager');
+      if (ok) {
+        const updatedComplaints = complaints.map(c => {
+          if (c.id === complaintId) {
+            const updatedCosts = (c.costs || []).map(cost => 
+              cost.id === costId ? { ...cost, status: 'VERIFIED_INCURRED' as CostStatus, verifiedAt: new Date().toISOString() } : cost
+            );
+            return { ...c, costs: updatedCosts };
+          }
+          return c;
+        });
+        setComplaints(updatedComplaints);
+        if (selectedComplaint?.id === complaintId) {
+          setSelectedComplaint(prev => prev ? {
+            ...prev,
+            costs: (prev.costs || []).map(cost => cost.id === costId ? { ...cost, status: 'VERIFIED_INCURRED' as CostStatus } : cost)
+          } : null);
+          setComplaintCostsList(prev => prev.map(c => c.id === costId ? { ...c, status: 'VERIFIED_INCURRED' as CostStatus } : c));
+        }
+        const summ = await computeComplaintDashboardSummary(updatedComplaints);
+        setSummary(summ);
+        alert('Cost verified and audited as Incurred Company Loss!');
+      }
+    } catch (err) {
+      console.error('Error verifying cost:', err);
+    }
+  };
+
+  // Aggregated Cost Records Across All Active Complaints
+  const allCostRecords = useMemo(() => {
+    const list: (CostRecord & { complaintNumber: string; complaintTitle: string; complaintCategory: ComplaintCategory; complaintCity: KeralaCity })[] = [];
+    complaints.forEach(c => {
+      (c.costs || []).forEach(cost => {
+        list.push({
+          ...cost,
+          complaintNumber: c.complaintNumber,
+          complaintTitle: c.title,
+          complaintCategory: c.category,
+          complaintCity: c.city,
+        });
+      });
+    });
+    return list;
+  }, [complaints]);
+
+  // ==========================================
+  // PHASE 5: EMPLOYEE TRAINING HANDLERS
+  // ==========================================
+  const handleAssignTraining = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedEmployeeForDetail) return;
+    setSubmittingTraining(true);
+    try {
+      const record = await assignEmployeeTraining(selectedEmployeeForDetail.id, assignTrainingForm);
+      if (record) {
+        setEmployeeTrainingList(prev => [record, ...prev]);
+        setEmployees(prev => prev.map(emp => 
+          emp.id === selectedEmployeeForDetail.id ? { ...emp, trainingStatus: 'TRAINING_REQUIRED' } : emp
+        ));
+        setSelectedEmployeeForDetail(prev => prev ? { ...prev, trainingStatus: 'TRAINING_REQUIRED' } : null);
+        setShowAssignTrainingModal(false);
+        alert(`Training Module "${assignTrainingForm.moduleTitle}" assigned to ${selectedEmployeeForDetail.fullName}!`);
+      }
+    } catch (err) {
+      console.error('Error assigning training:', err);
+      alert('Failed to assign training module.');
+    } finally {
+      setSubmittingTraining(false);
+    }
+  };
+
+  const handleCompleteTraining = async (trainingId: string) => {
+    if (!selectedEmployeeForDetail) return;
+    try {
+      const ok = await completeEmployeeTraining(
+        selectedEmployeeForDetail.id,
+        trainingId,
+        96.0,
+        'Demonstrated 100% SOP adherence on natural surface chemical selection and pre-masking'
+      );
+      if (ok) {
+        setEmployeeTrainingList(prev => prev.map(t => 
+          t.id === trainingId ? { ...t, status: 'COMPLETED_PASSED', scorePct: 96.0, completionDate: new Date().toISOString().split('T')[0] } : t
+        ));
+        setEmployees(prev => prev.map(emp => 
+          emp.id === selectedEmployeeForDetail.id ? { ...emp, trainingStatus: 'UP_TO_DATE' } : emp
+        ));
+        setSelectedEmployeeForDetail(prev => prev ? { ...prev, trainingStatus: 'UP_TO_DATE' } : null);
+        alert(`Module verified as COMPLETED PASSED (Score: 96.0%). ${selectedEmployeeForDetail.fullName}'s career status restored to UP TO DATE!`);
+      }
+    } catch (err) {
+      console.error('Error completing training:', err);
+      alert('Failed to complete training.');
     }
   };
 
@@ -1487,106 +1816,520 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
           </div>
         )}
 
-        {/* SUB-TAB 5: APPROVALS */}
+        {/* SUB-TAB 5: APPROVALS (EXECUTIVE APPROVAL CENTRE) */}
         {activeSubTab === 'Approvals' && (
           <div className="max-w-7xl mx-auto space-y-6 animate-fadeIn">
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-3">
-              <h3 className="text-sm font-bold text-slate-900">Executive Approval Centre & Responsibility Decisions</h3>
-              <p className="text-xs text-slate-500">Dual-authorization routing for financial adjustments, customer goodwill absorption, and corrective action enforcement</p>
-              
-              <div className="p-4 bg-amber-50 rounded-xl border border-amber-200 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <TargetIcon className="w-5 h-5 text-amber-700" />
-                  <div>
-                    <span className="text-xs font-bold text-amber-900 block">Cases Pending Executive Sanction</span>
-                    <span className="text-[11px] text-amber-700">Financial absorption &gt; ₹5,000 requires Operations Manager + COO approval</span>
-                  </div>
+            {/* Executive Governance Policy Header */}
+            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-6 shadow-md flex flex-wrap items-center justify-between gap-4">
+              <div className="space-y-1.5 max-w-2xl">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-black tracking-widest bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase">
+                    Master Spec Section 8
+                  </span>
+                  <h3 className="text-base font-bold text-white">Executive Dual-Authorization Centre</h3>
                 </div>
-                <button 
-                  onClick={() => setActiveSubTab('Register')}
-                  className="text-xs font-bold px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white"
-                >
-                  View in Register
-                </button>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Tiered financial loss absorption and responsibility ratification matrix. Multi-level executive sanction ensures fair hearing, accurate root-cause ratification, and audit-proof financial governance.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2 text-[11px]">
+                <div className="bg-white/10 backdrop-blur-sm border border-white/15 px-3 py-2 rounded-xl text-center">
+                  <span className="text-slate-400 block text-[9px] uppercase font-bold tracking-wider">Tier 1: Up to ₹5,000</span>
+                  <span className="font-bold text-emerald-300">Operations Manager</span>
+                </div>
+                <div className="bg-white/10 backdrop-blur-sm border border-white/15 px-3 py-2 rounded-xl text-center">
+                  <span className="text-slate-400 block text-[9px] uppercase font-bold tracking-wider">Tier 2: ₹5k – ₹15k</span>
+                  <span className="font-bold text-amber-300">Ops Manager + COO</span>
+                </div>
+                <div className="bg-white/10 backdrop-blur-sm border border-white/15 px-3 py-2 rounded-xl text-center">
+                  <span className="text-slate-400 block text-[9px] uppercase font-bold tracking-wider">Tier 3: Above ₹15k</span>
+                  <span className="font-bold text-rose-300">COO + Management</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Approval Queue & Role Filters */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">Cases Pending Executive Sanction & Responsibility Ratification</h4>
+                  <p className="text-xs text-slate-500">Tickets awaiting formal executive sign-off before closure or financial disbursement</p>
+                </div>
+
+                <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+                  {(['ALL', 'OPERATIONS_MANAGER', 'COO', 'MANAGEMENT_ADMIN'] as const).map(role => (
+                    <button
+                      key={role}
+                      onClick={() => setApprovalsRoleFilter(role)}
+                      className={`px-3 py-1.5 rounded-lg transition-all ${
+                        approvalsRoleFilter === role
+                          ? 'bg-white text-indigo-700 shadow-sm font-bold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {role === 'ALL' ? 'All Tiers' : role.replace(/_/g, ' ')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Pending Queue Items */}
+              {(() => {
+                const pendingCases = complaints.filter(c => {
+                  if (c.status === 'CLOSED') return false;
+                  const totalCost = (c.costs || []).reduce((acc, cost) => acc + cost.amount, 0);
+                  const reqRole = totalCost > 15000 ? 'MANAGEMENT_ADMIN' : totalCost >= 5000 ? 'COO' : 'OPERATIONS_MANAGER';
+                  if (approvalsRoleFilter !== 'ALL' && reqRole !== approvalsRoleFilter) return false;
+                  return c.status === 'APPROVAL_PENDING' || totalCost > 0;
+                });
+
+                if (pendingCases.length === 0) {
+                  return (
+                    <div className="text-center py-10 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                      <CheckCircledIcon className="w-10 h-10 text-emerald-500 mx-auto" />
+                      <p className="text-xs font-bold text-slate-800">All Executive Approvals Up to Date</p>
+                      <p className="text-[11px] text-slate-500">No cases currently awaiting executive sanction in this tier.</p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="space-y-3">
+                    {pendingCases.map(c => {
+                      const totalCost = (c.costs || []).reduce((acc, cost) => acc + cost.amount, 0);
+                      const verifiedLoss = (c.costs || []).reduce((acc, cost) => acc + (cost.status === 'VERIFIED_INCURRED' ? cost.amount : 0), 0);
+                      const reqAuthority = totalCost > 15000 ? 'MANAGEMENT_ADMIN' : totalCost >= 5000 ? 'COO' : 'OPERATIONS_MANAGER';
+
+                      return (
+                        <div key={c.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/60 hover:bg-white transition-all space-y-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
+                                  {c.complaintNumber}
+                                </span>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-200 text-slate-800">
+                                  {c.city}
+                                </span>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${SEVERITY_COLORS[c.severity]?.bg} ${SEVERITY_COLORS[c.severity]?.text}`}>
+                                  {c.severity}
+                                </span>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${STATUS_BADGES[c.status]?.bg} ${STATUS_BADGES[c.status]?.text}`}>
+                                  {STATUS_BADGES[c.status]?.label || c.status}
+                                </span>
+                              </div>
+                              <h5 className="text-sm font-bold text-slate-900">{c.title}</h5>
+                              <p className="text-xs text-slate-500">
+                                Customer: <strong className="text-slate-700">{c.customerName}</strong> ({c.serviceType.replace(/_/g, ' ')}) · Job Value: {formatINR(c.jobValue)}
+                              </p>
+                            </div>
+
+                            <div className="text-right space-y-1">
+                              <span className="text-[10px] text-slate-400 uppercase font-bold block">Exposure / Incurred Loss</span>
+                              <span className="text-lg font-black text-rose-600 block">{formatINR(totalCost || verifiedLoss)}</span>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 inline-block">
+                                Required: {reqAuthority.replace(/_/g, ' ')}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200/80 text-xs">
+                            <div className="text-slate-600 text-[11px]">
+                              <span>Reported: {new Date(c.reportingDate).toLocaleDateString('en-IN')}</span> · 
+                              <span className="ml-1">Investigator: {c.assignedInvestigatorName || 'Unassigned'}</span>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => {
+                                  setSelectedComplaint(c);
+                                  setDrawerActiveTab('overview');
+                                }}
+                                className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 font-bold text-slate-700"
+                              >
+                                Inspect Full Ticket ↗
+                              </button>
+                              <button
+                                onClick={() => handleOpenApprovalModal(c)}
+                                className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 font-bold text-white shadow-sm flex items-center gap-1.5"
+                              >
+                                <CheckCircledIcon className="w-3.5 h-3.5" />
+                                Review & Record Sanction
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Historical Executive Decisions Stream */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
+              <h4 className="text-sm font-bold text-slate-900">Recent Executive Approvals & Sanction Audit Trail</h4>
+              <p className="text-xs text-slate-500">Immutable record of ratified responsibility findings, financial absorption, and conditional covenants</p>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-500 uppercase tracking-wider text-[10px] border-b border-slate-200">
+                      <th className="p-3">Approver</th>
+                      <th className="p-3">Role & Authority</th>
+                      <th className="p-3">Decision</th>
+                      <th className="p-3">Financial Approved</th>
+                      <th className="p-3">Executive Comments & Conditions</th>
+                      <th className="p-3">Timestamp (IST)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    <tr className="hover:bg-slate-50/50">
+                      <td className="p-3 font-bold text-slate-900">Harikrishnan Menon</td>
+                      <td className="p-3">
+                        <span className="font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded text-[10px]">
+                          OPERATIONS_MANAGER
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded text-[10px] border border-emerald-200">
+                          APPROVED
+                        </span>
+                      </td>
+                      <td className="p-3 font-mono font-bold text-rose-600">₹4,800</td>
+                      <td className="p-3 text-slate-600 max-w-xs">
+                        Workmanship lapse verified on kitchen cabinet hinge. ₹4,800 third-party carpentry vendor approved for company absorption. Refresher coaching assigned.
+                      </td>
+                      <td className="p-3 text-slate-400 font-mono text-[10px]">2026-10-15 14:30</td>
+                    </tr>
+                    <tr className="hover:bg-slate-50/50">
+                      <td className="p-3 font-bold text-slate-900">Suresh Kurup</td>
+                      <td className="p-3">
+                        <span className="font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded text-[10px]">
+                          COO
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded text-[10px] border border-emerald-200">
+                          APPROVED
+                        </span>
+                      </td>
+                      <td className="p-3 font-mono font-bold text-rose-600">₹2,500</td>
+                      <td className="p-3 text-slate-600 max-w-xs">
+                        Free rework team dispatch approved under Company Goodwill Policy to protect client relationship. Senior supervisor must accompany crew.
+                      </td>
+                      <td className="p-3 text-slate-400 font-mono text-[10px]">2026-10-16 11:15</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
         )}
 
-        {/* SUB-TAB 6: EMPLOYEE TRACKER */}
+        {/* SUB-TAB 6: EMPLOYEE TRACKER & COACHING HUB */}
         {activeSubTab === 'Employees' && (
-          <div className="max-w-7xl mx-auto space-y-4 animate-fadeIn">
-            <div className="flex justify-between items-center">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Kerala Technicians & Supervisors Directory</h3>
-                <p className="text-xs text-slate-500">Track substantiated complaint findings vs allegations, and training certifications</p>
+          <div className="max-w-7xl mx-auto space-y-5 animate-fadeIn">
+            {/* Section 9 Guardrail Banner */}
+            <div className="bg-gradient-to-r from-emerald-900 via-teal-950 to-emerald-900 text-white rounded-2xl p-6 shadow-md flex flex-wrap items-center justify-between gap-4">
+              <div className="space-y-1.5 max-w-3xl">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-black tracking-widest bg-emerald-400/20 text-emerald-300 border border-emerald-400/30 uppercase">
+                    Master Spec Section 9
+                  </span>
+                  <h3 className="text-base font-bold text-white">Coaching-First Employee Career & Training Framework</h3>
+                </div>
+                <p className="text-xs text-slate-200 leading-relaxed">
+                  Strict separation of customer allegations from verified findings. Repeat complaints trigger mandatory technical coaching, mentor pairing, and SOP reassessment rather than punitive deductions.
+                </p>
               </div>
-              <span className="text-xs font-bold text-slate-500">{employees.length} Staff Enrolled</span>
+
+              <div className="flex items-center gap-2 text-xs">
+                <div className="bg-white/10 backdrop-blur-sm border border-white/15 px-3 py-2 rounded-xl text-center">
+                  <span className="text-slate-300 block text-[9px] uppercase font-bold">Active Staff</span>
+                  <span className="font-bold text-white text-base">{employees.length}</span>
+                </div>
+                <div className="bg-white/10 backdrop-blur-sm border border-white/15 px-3 py-2 rounded-xl text-center">
+                  <span className="text-slate-300 block text-[9px] uppercase font-bold">Certifications Up to Date</span>
+                  <span className="font-bold text-emerald-300 text-base">
+                    {employees.filter(e => e.trainingStatus === 'UP_TO_DATE').length}
+                  </span>
+                </div>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {employees.map((emp) => (
-                <div key={emp.id} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-mono font-bold text-indigo-700">{emp.employeeCode}</span>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
-                          {emp.city}
+            {/* Employee Directory */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">Kerala Crew & Supervisor Roster</h4>
+                  <p className="text-xs text-slate-500">Track complaints named in, substantiated findings, and skill certification status</p>
+                </div>
+                <span className="text-xs font-bold text-slate-500">{employees.length} Staff Enrolled</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {employees.map((emp) => {
+                  // Compute stats from complaints
+                  let namedCount = 0;
+                  let substantiatedCount = 0;
+                  let exoneratedCount = 0;
+
+                  complaints.forEach(c => {
+                    (c.participants || []).forEach(p => {
+                      if (p.employeeId === emp.id || p.employee?.id === emp.id) {
+                        namedCount++;
+                        if (p.allegationStatus === 'SUBSTANTIATED') substantiatedCount++;
+                        if (p.allegationStatus === 'EXONERATED') exoneratedCount++;
+                      }
+                    });
+                  });
+
+                  return (
+                    <div key={emp.id} className="bg-slate-50/70 hover:bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:shadow transition-all space-y-3">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">
+                              {emp.employeeCode}
+                            </span>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-200 text-slate-800">
+                              {emp.city}
+                            </span>
+                          </div>
+                          <h5 className="text-sm font-bold text-slate-900 mt-1">{emp.fullName}</h5>
+                          <p className="text-xs text-slate-500 font-medium">{emp.designation.replace(/_/g, ' ')}</p>
+                        </div>
+
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          emp.trainingStatus === 'UP_TO_DATE' 
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                            : 'bg-amber-50 text-amber-700 border border-amber-200'
+                        }`}>
+                          {emp.trainingStatus.replace(/_/g, ' ')}
                         </span>
                       </div>
-                      <h4 className="text-sm font-bold text-slate-900 mt-1">{emp.fullName}</h4>
-                      <p className="text-xs text-slate-500">{emp.designation.replace(/_/g, ' ')} · {emp.primaryPhone}</p>
-                    </div>
 
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      emp.trainingStatus === 'UP_TO_DATE' 
-                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                        : 'bg-amber-50 text-amber-700 border border-amber-200'
-                    }`}>
-                      {emp.trainingStatus.replace(/_/g, ' ')}
-                    </span>
-                  </div>
+                      {/* Performance Counters: Allegations vs Findings */}
+                      <div className="grid grid-cols-3 gap-1.5 pt-2 border-t border-slate-200 text-center text-xs">
+                        <div className="bg-white p-2 rounded-lg border border-slate-100">
+                          <span className="text-slate-400 block text-[9px] font-bold uppercase">Jobs In</span>
+                          <span className="font-extrabold text-slate-800">{namedCount}</span>
+                        </div>
+                        <div className="bg-white p-2 rounded-lg border border-slate-100">
+                          <span className="text-slate-400 block text-[9px] font-bold uppercase">Exonerated</span>
+                          <span className="font-extrabold text-emerald-600">{exoneratedCount}</span>
+                        </div>
+                        <div className="bg-white p-2 rounded-lg border border-slate-100">
+                          <span className="text-slate-400 block text-[9px] font-bold uppercase">Substantiated</span>
+                          <span className={`font-extrabold ${substantiatedCount > 0 ? 'text-rose-600' : 'text-slate-700'}`}>
+                            {substantiatedCount}
+                          </span>
+                        </div>
+                      </div>
 
-                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 text-[11px]">
-                    <div className="bg-slate-50 p-2 rounded-lg">
-                      <span className="text-slate-400 block text-[10px]">Hire Date:</span>
-                      <span className="font-semibold text-slate-700">{emp.hireDate}</span>
+                      <div className="pt-2 flex justify-between items-center text-xs">
+                        <span className="text-slate-500 font-medium text-[11px]">{emp.primaryPhone}</span>
+                        <button
+                          onClick={() => setSelectedEmployeeForDetail(emp)}
+                          className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 font-bold text-indigo-700 text-xs transition-colors"
+                        >
+                          Coaching Dossier →
+                        </button>
+                      </div>
                     </div>
-                    <div className="bg-slate-50 p-2 rounded-lg">
-                      <span className="text-slate-400 block text-[10px]">Status:</span>
-                      <span className="font-bold text-emerald-700">{emp.status}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
 
-        {/* SUB-TAB 7: FINANCIAL IMPACT */}
+        {/* SUB-TAB 7: FINANCIAL IMPACT CENTRE */}
         {activeSubTab === 'Financial' && summary && (
           <div className="max-w-7xl mx-auto space-y-6 animate-fadeIn">
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
-              <h3 className="text-sm font-bold text-slate-900">Complaint Cost & Financial Exposure Ledger</h3>
-              <p className="text-xs text-slate-500">Segregation of verified company loss, rework expenses, client compensation vouchers, and employee adjustments</p>
+            {/* Section 8 Statutory Protection Banner */}
+            <div className="bg-gradient-to-r from-slate-900 via-rose-950 to-slate-900 text-white rounded-2xl p-6 shadow-md flex flex-wrap items-center justify-between gap-4">
+              <div className="space-y-1.5 max-w-3xl">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-black tracking-widest bg-rose-500/20 text-rose-300 border border-rose-500/30 uppercase">
+                    Master Spec Section 8 Compliance
+                  </span>
+                  <h3 className="text-base font-bold text-white">Financial Loss Ledger & Employee Protection Protocol</h3>
+                </div>
+                <p className="text-xs text-slate-200 leading-relaxed">
+                  Strict prohibition against automatic employee salary or incentive deductions. Company absorption is prioritized for operational goodwill. Any proposed adjustment requires documented evidence, formal employee hearing, and authorized executive signoff.
+                </p>
+              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-                <div className="bg-rose-50 border border-rose-100 p-4 rounded-xl">
-                  <span className="text-xs font-bold text-rose-700 block">Verified Company Absorption</span>
-                  <span className="text-2xl font-black text-rose-800 mt-1 block">{formatINR(summary.totalVerifiedLoss)}</span>
-                  <span className="text-[10px] text-rose-600 block mt-1">Paid directly by Handy Squad</span>
+              <button
+                onClick={() => handleOpenAddCostModal()}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md flex items-center gap-1.5"
+              >
+                <PlusIcon className="w-4 h-4" />
+                Book Expense / Invoice
+              </button>
+            </div>
+
+            {/* High-Level Financial Impact KPIs */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Verified Incurred Loss</span>
+                <span className="text-2xl font-black text-rose-700 block">{formatINR(summary.totalVerifiedLoss)}</span>
+                <span className="text-[11px] text-slate-500 font-medium">Audited & settled by Handy Squad</span>
+              </div>
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Estimated Pending Rectification</span>
+                <span className="text-2xl font-black text-amber-600 block">{formatINR(summary.totalEstimatedLoss)}</span>
+                <span className="text-[11px] text-slate-500 font-medium">Under contractor quote or rework pass</span>
+              </div>
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Company Absorption Ratio</span>
+                <span className="text-2xl font-black text-emerald-700 block">100%</span>
+                <span className="text-[11px] text-slate-500 font-medium">Zero unauthorized staff deductions</span>
+              </div>
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Free Rework Services</span>
+                <span className="text-2xl font-black text-indigo-700 block">{summary.reworkCount} Jobs</span>
+                <span className="text-[11px] text-slate-500 font-medium">Customer satisfaction re-visits</span>
+              </div>
+            </div>
+
+            {/* Granular Cost Ledger Table */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">Itemized Financial Ledger & Expense Book</h4>
+                  <p className="text-xs text-slate-500">Every rework cost, replacement part, third-party contractor invoice, and goodwill refund</p>
                 </div>
-                <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl">
-                  <span className="text-xs font-bold text-amber-700 block">Estimated Pending Rectification</span>
-                  <span className="text-2xl font-black text-amber-800 mt-1 block">{formatINR(summary.totalEstimatedLoss)}</span>
-                  <span className="text-[10px] text-amber-600 block mt-1">Under investigation or vendor quote</span>
+
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <select
+                    value={costTypeFilter}
+                    onChange={(e) => setCostTypeFilter(e.target.value)}
+                    className="border border-slate-300 rounded-lg p-1.5 text-xs font-semibold bg-white"
+                  >
+                    <option value="ALL">All Cost Types</option>
+                    <option value="REWORK_LABOUR">Rework Labour</option>
+                    <option value="DAMAGE_REPAIR_VENDOR">Damage Repair Vendor</option>
+                    <option value="CUSTOMER_REFUND">Customer Refund</option>
+                    <option value="CUSTOMER_DISCOUNT_COUPON">Customer Goodwill Voucher</option>
+                    <option value="MATERIALS_PARTS">Materials & Parts</option>
+                    <option value="TRAVEL_LOGISTICS">Travel & Transit</option>
+                  </select>
+
+                  <select
+                    value={costStatusFilter}
+                    onChange={(e) => setCostStatusFilter(e.target.value)}
+                    className="border border-slate-300 rounded-lg p-1.5 text-xs font-semibold bg-white"
+                  >
+                    <option value="ALL">All Statuses</option>
+                    <option value="ESTIMATED">Estimated / Pending</option>
+                    <option value="VERIFIED_INCURRED">Verified Incurred Loss</option>
+                    <option value="SETTLED">Settled</option>
+                  </select>
                 </div>
-                <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-xl">
-                  <span className="text-xs font-bold text-emerald-700 block">Rework & Rectifications</span>
-                  <span className="text-2xl font-black text-emerald-800 mt-1 block">{summary.reworkCount} Jobs</span>
-                  <span className="text-[10px] text-emerald-600 block mt-1">Free rework passes to ensure client delight</span>
-                </div>
+              </div>
+
+              {/* Table of Costs */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-500 uppercase tracking-wider text-[10px] border-b border-slate-200">
+                      <th className="p-3">Complaint #</th>
+                      <th className="p-3">Cost Type</th>
+                      <th className="p-3">Description & Invoice Ref</th>
+                      <th className="p-3">Vendor / Service Provider</th>
+                      <th className="p-3 text-right">Amount</th>
+                      <th className="p-3">Absorption Policy</th>
+                      <th className="p-3">Status</th>
+                      <th className="p-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {(() => {
+                      const filteredCosts = allCostRecords.filter(c => {
+                        if (costTypeFilter !== 'ALL' && c.costType !== costTypeFilter) return false;
+                        if (costStatusFilter !== 'ALL' && c.status !== costStatusFilter) return false;
+                        return true;
+                      });
+
+                      if (filteredCosts.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan={8} className="p-6 text-center text-slate-400 italic">
+                              No expense records match the selected filter criteria.
+                            </td>
+                          </tr>
+                        );
+                      }
+
+                      return filteredCosts.map(cost => (
+                        <tr key={cost.id} className="hover:bg-slate-50/60 transition-colors">
+                          <td className="p-3 font-mono font-bold text-indigo-700">
+                            {cost.complaintNumber}
+                          </td>
+                          <td className="p-3">
+                            <span className="font-semibold px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-800">
+                              {cost.costType.replace(/_/g, ' ')}
+                            </span>
+                          </td>
+                          <td className="p-3 max-w-xs">
+                            <span className="text-slate-800 font-semibold block">{cost.description}</span>
+                            {cost.invoiceReceiptRef && (
+                              <span className="text-[10px] font-mono text-slate-400 block">Ref: {cost.invoiceReceiptRef}</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-slate-700 font-medium">
+                            {cost.vendorName || 'Handy Squad Internal'}
+                          </td>
+                          <td className="p-3 text-right font-black font-mono text-rose-600 text-sm">
+                            {formatINR(cost.amount)}
+                          </td>
+                          <td className="p-3">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              {cost.isCompanyAbsorption ? '✓ 100% Handy Squad Absorbed' : 'Proposed Shared'}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                              cost.status === 'VERIFIED_INCURRED' 
+                                ? 'bg-rose-50 text-rose-700 border border-rose-200' 
+                                : 'bg-amber-50 text-amber-700 border border-amber-200'
+                            }`}>
+                              {cost.status.replace(/_/g, ' ')}
+                            </span>
+                          </td>
+                          <td className="p-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {cost.status === 'ESTIMATED' && (
+                                <button
+                                  onClick={() => handleVerifyCost(cost.complaintId, cost.id)}
+                                  className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px]"
+                                >
+                                  Verify Incurred Loss
+                                </button>
+                              )}
+                              <button
+                                onClick={() => {
+                                  const comp = complaints.find(c => c.id === cost.complaintId);
+                                  if (comp) {
+                                    setSelectedComplaint(comp);
+                                    setDrawerActiveTab('financial');
+                                  }
+                                }}
+                                className="px-2 py-1 rounded border border-slate-200 hover:bg-slate-100 font-bold text-[10px] text-slate-700"
+                              >
+                                Ticket ↗
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ));
+                    })()}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
@@ -1663,8 +2406,8 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
                 { id: 'evidence', label: `Evidence Vault (${selectedComplaint.evidence?.length || 0})` },
                 { id: 'investigation', label: 'Root Cause Findings' },
                 { id: 'assessment', label: 'Responsibility Assessment' },
-                { id: 'corrective', label: `Corrective Actions (${correctiveActionsList.length})` },
-                { id: 'financial', label: 'Financial Ledger' },
+                { id: 'financial', label: `Financial Ledger (${(selectedComplaint.costs || []).length})` },
+                { id: 'approvals', label: `Approvals (${complaintApprovalsList.length})` },
                 { id: 'actions', label: 'Pipeline Actions' },
               ].map((t) => (
                 <button
@@ -2198,32 +2941,142 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
 
             {/* TAB 7: FINANCIAL LEDGER */}
             {drawerActiveTab === 'financial' && (
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-bold text-slate-700">Financial Loss & Compensation Records:</span>
+              <div className="space-y-4">
+                <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-200">
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 block">Financial Exposure Ledger:</span>
+                    <span className="text-[10px] text-slate-500">Itemized losses, rework labour, vendor bills & refunds</span>
+                  </div>
+                  <button
+                    onClick={() => handleOpenAddCostModal(selectedComplaint.id)}
+                    className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-1 shadow-sm"
+                  >
+                    <PlusIcon className="w-3.5 h-3.5" />
+                    Book Expense / Invoice
+                  </button>
                 </div>
+
                 {(selectedComplaint.costs || []).length > 0 ? (
                   <div className="space-y-2">
                     {(selectedComplaint.costs || []).map((cost) => (
-                      <div key={cost.id} className="flex justify-between items-center p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
-                        <div>
-                          <span className="font-bold text-slate-800 block">{cost.costType.replace(/_/g, ' ')}</span>
-                          <span className="text-[10px] text-slate-500">{cost.description}</span>
-                          <span className="text-[9px] text-emerald-700 block font-semibold">
-                            {cost.isCompanyAbsorption ? '✓ 100% Absorbed by Handy Squad' : 'Shared Cost'}
-                          </span>
+                      <div key={cost.id} className="p-3.5 rounded-xl bg-slate-50/80 border border-slate-200 text-xs space-y-2">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-slate-800">{cost.costType.replace(/_/g, ' ')}</span>
+                              <span className={`text-[9px] font-bold px-2 py-0.5 rounded ${
+                                cost.status === 'VERIFIED_INCURRED' 
+                                  ? 'bg-rose-50 text-rose-700 border border-rose-200' 
+                                  : 'bg-amber-50 text-amber-700 border border-amber-200'
+                              }`}>
+                                {cost.status.replace(/_/g, ' ')}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-600 mt-1">{cost.description}</p>
+                            {cost.invoiceReceiptRef && (
+                              <span className="text-[10px] font-mono text-slate-400 block mt-0.5">
+                                Invoice Ref: {cost.invoiceReceiptRef} · Vendor: {cost.vendorName || 'Handy Squad Direct'}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            <span className="font-black text-rose-600 text-base">{formatINR(cost.amount)}</span>
+                            <span className="text-[9px] text-emerald-700 block font-semibold">
+                              {cost.isCompanyAbsorption ? '✓ 100% Absorbed' : 'Shared Cost'}
+                            </span>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <span className="font-black text-rose-600 text-sm">{formatINR(cost.amount)}</span>
-                          <span className="text-[10px] text-slate-400 block font-semibold">{cost.status}</span>
-                        </div>
+
+                        {cost.status === 'ESTIMATED' && (
+                          <div className="flex justify-end pt-2 border-t border-slate-200/60">
+                            <button
+                              onClick={() => handleVerifyCost(selectedComplaint.id, cost.id)}
+                              className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] shadow-xs"
+                            >
+                              Verify as Incurred Loss ✓
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-xs text-slate-400 italic bg-slate-50 p-4 rounded-xl border border-slate-200 text-center">
-                    No financial costs recorded for this complaint.
-                  </p>
+                  <div className="text-center py-8 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                    <p className="text-xs text-slate-400 italic">No financial costs booked for this complaint yet.</p>
+                    <button
+                      onClick={() => handleOpenAddCostModal(selectedComplaint.id)}
+                      className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white font-bold text-xs text-indigo-700 hover:bg-slate-50"
+                    >
+                      + Book First Expense
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 8: EXECUTIVE APPROVALS */}
+            {drawerActiveTab === 'approvals' && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-200">
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 block">Executive Sanction History:</span>
+                    <span className="text-[10px] text-slate-500">Multi-level authorization for responsibility & financial absorption</span>
+                  </div>
+                  <button
+                    onClick={() => handleOpenApprovalModal(selectedComplaint)}
+                    className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-1 shadow-sm"
+                  >
+                    <CheckCircledIcon className="w-3.5 h-3.5" />
+                    Record Executive Decision
+                  </button>
+                </div>
+
+                {complaintApprovalsList.length > 0 ? (
+                  <div className="space-y-2">
+                    {complaintApprovalsList.map((app) => (
+                      <div key={app.id} className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-1.5">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-slate-900">{app.approverName}</span>
+                              <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">
+                                {app.approverRole.replace(/_/g, ' ')}
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              {new Date(app.createdAt).toLocaleString('en-IN')}
+                            </span>
+                          </div>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                            app.decision === 'APPROVED' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'
+                          }`}>
+                            {app.decision}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-700 bg-white p-2 rounded-lg border border-slate-100">{app.comments}</p>
+                        {app.conditions && (
+                          <p className="text-[11px] text-amber-800 bg-amber-50/60 p-2 rounded-lg border border-amber-200/60">
+                            <strong>Conditions:</strong> {app.conditions}
+                          </p>
+                        )}
+                        {app.financialAmountApproved !== undefined && (
+                          <div className="text-right text-[11px] font-bold text-slate-600 pt-1">
+                            Amount Approved: <span className="font-black text-rose-600">{formatINR(app.financialAmountApproved)}</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                    <p className="text-xs text-slate-400 italic">No formal executive approvals recorded for this case yet.</p>
+                    <button
+                      onClick={() => handleOpenApprovalModal(selectedComplaint)}
+                      className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white font-bold text-xs text-indigo-700 hover:bg-slate-50"
+                    >
+                      Record First Approval Decision
+                    </button>
+                  </div>
                 )}
               </div>
             )}
@@ -2815,6 +3668,611 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
                   className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
                 >
                   {savingStatement ? 'Saving...' : 'Save Statement to Case File'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 1: EXECUTIVE SANCTION & APPROVAL */}
+      {showApprovalModal && targetComplaintForApproval && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 my-8 max-h-[92vh] overflow-y-auto animate-fadeIn">
+            <div className="flex justify-between items-start border-b border-slate-100 pb-3">
+              <div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono">
+                  {targetComplaintForApproval.complaintNumber}
+                </span>
+                <h3 className="text-base font-bold text-slate-900 mt-1">Record Executive Sanction & Decision</h3>
+                <p className="text-xs text-slate-500">
+                  {targetComplaintForApproval.customerName} · {targetComplaintForApproval.city} · Value: {formatINR(targetComplaintForApproval.jobValue)}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowApprovalModal(false)}
+                className="text-slate-400 hover:text-slate-600 text-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitApproval} className="space-y-4 text-xs">
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="font-semibold text-slate-600">Calculated Exposure / Cost:</span>
+                  <span className="font-black text-rose-600 text-sm">
+                    {formatINR((targetComplaintForApproval.costs || []).reduce((acc, c) => acc + c.amount, 0))}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-[11px]">
+                  <span className="text-slate-500">Required Governance Authority:</span>
+                  <span className="font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">
+                    {((targetComplaintForApproval.costs || []).reduce((acc, c) => acc + c.amount, 0) > 15000)
+                      ? 'MANAGEMENT_ADMIN'
+                      : ((targetComplaintForApproval.costs || []).reduce((acc, c) => acc + c.amount, 0) >= 5000)
+                        ? 'COO'
+                        : 'OPERATIONS_MANAGER'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-slate-700 block">Approver Role Authority *</label>
+                  <select
+                    value={approvalDecisionForm.approverRole}
+                    onChange={(e) => setApprovalDecisionForm({ ...approvalDecisionForm, approverRole: e.target.value as any })}
+                    className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-bold bg-white"
+                  >
+                    <option value="OPERATIONS_MANAGER">Operations Manager (Up to ₹5k)</option>
+                    <option value="COO">Chief Operating Officer (Up to ₹15k)</option>
+                    <option value="MANAGEMENT_ADMIN">Management Admin / Director (&gt; ₹15k)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-700 block">Approver Full Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={approvalDecisionForm.approverName}
+                    onChange={(e) => setApprovalDecisionForm({ ...approvalDecisionForm, approverName: e.target.value })}
+                    className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-medium"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-slate-700 block">Sanction Type *</label>
+                  <select
+                    value={approvalDecisionForm.approvalType}
+                    onChange={(e) => setApprovalDecisionForm({ ...approvalDecisionForm, approvalType: e.target.value as any })}
+                    className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-bold bg-white"
+                  >
+                    <option value="RESPONSIBILITY_ASSESSMENT">Responsibility Assessment Ratification</option>
+                    <option value="FINANCIAL_EXPOSURE">Financial Loss / Absorption Sanction</option>
+                    <option value="COMPLAINT_CLOSURE">Final Complaint Closure Sanction</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-700 block">Financial Amount Approved (₹)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={approvalDecisionForm.financialAmountApproved}
+                    onChange={(e) => setApprovalDecisionForm({ ...approvalDecisionForm, financialAmountApproved: Number(e.target.value) })}
+                    className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-mono font-bold"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block">Executive Decision *</label>
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  {[
+                    { id: 'APPROVED', label: 'Approve & Sanction ✓', color: 'border-emerald-500 bg-emerald-50 text-emerald-800' },
+                    { id: 'REJECTED', label: 'Reject Assessment ✕', color: 'border-rose-500 bg-rose-50 text-rose-800' },
+                    { id: 'ESCALATED', label: 'Escalate to Board ↗', color: 'border-amber-500 bg-amber-50 text-amber-800' },
+                    { id: 'RETURNED_FOR_INVESTIGATION', label: 'Return to Desk ↩', color: 'border-slate-500 bg-slate-50 text-slate-800' },
+                  ].map((opt) => (
+                    <label
+                      key={opt.id}
+                      className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer font-bold transition-all ${
+                        approvalDecisionForm.decision === opt.id
+                          ? opt.color + ' ring-2 ring-indigo-500/40'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="approvalDecision"
+                        value={opt.id}
+                        checked={approvalDecisionForm.decision === opt.id}
+                        onChange={() => setApprovalDecisionForm({ ...approvalDecisionForm, decision: opt.id as any })}
+                        className="sr-only"
+                      />
+                      <span>{opt.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block">Executive Comments & Rationale *</label>
+                <textarea
+                  rows={2}
+                  required
+                  placeholder="Record formal executive rationale, findings validation, or rejection grounds..."
+                  value={approvalDecisionForm.comments}
+                  onChange={(e) => setApprovalDecisionForm({ ...approvalDecisionForm, comments: e.target.value })}
+                  className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block">Mandatory Directives / Conditions (Optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Technician Anas Mohammed must complete Delicate Surface Coaching module..."
+                  value={approvalDecisionForm.conditions}
+                  onChange={(e) => setApprovalDecisionForm({ ...approvalDecisionForm, conditions: e.target.value })}
+                  className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-medium"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowApprovalModal(false)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 font-semibold text-slate-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingApproval || !approvalDecisionForm.comments.trim()}
+                  className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-sm"
+                >
+                  {submittingApproval ? 'Submitting...' : 'Record Sanction'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: BOOK EXPENSE / INVOICE */}
+      {showAddCostModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 my-8 max-h-[92vh] overflow-y-auto animate-fadeIn">
+            <div className="flex justify-between items-start border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Book Complaint Expense / Vendor Invoice</h3>
+                <p className="text-xs text-slate-500">Record itemized loss, third-party contractor bills, replacement parts, or customer compensation</p>
+              </div>
+              <button
+                onClick={() => setShowAddCostModal(false)}
+                className="text-slate-400 hover:text-slate-600 text-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitCost} className="space-y-4 text-xs">
+              <div>
+                <label className="font-bold text-slate-700 block">Target Complaint Ticket *</label>
+                <select
+                  value={targetComplaintForCost}
+                  onChange={(e) => setTargetComplaintForCost(e.target.value)}
+                  className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-bold bg-white"
+                >
+                  {complaints.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.complaintNumber} - {c.customerName} ({c.city} · {c.category})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-slate-700 block">Cost Category *</label>
+                  <select
+                    value={costForm.costType}
+                    onChange={(e) => setCostForm({ ...costForm, costType: e.target.value as any })}
+                    className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-bold bg-white"
+                  >
+                    <option value="REWORK_LABOUR">Rework Labour (Secondary Crew)</option>
+                    <option value="DAMAGE_REPAIR_VENDOR">Damage Repair Vendor / Contractor</option>
+                    <option value="CUSTOMER_REFUND">Direct Customer Refund</option>
+                    <option value="CUSTOMER_DISCOUNT_COUPON">Customer Goodwill Voucher</option>
+                    <option value="MATERIALS_PARTS">Materials & Replacement Parts</option>
+                    <option value="TRAVEL_LOGISTICS">Travel & Emergency Transit</option>
+                    <option value="EQUIPMENT_REPAIR_VENDOR">Machine Servicing / Repair</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-700 block">Amount (INR) *</label>
+                  <input
+                    type="number"
+                    min={1}
+                    required
+                    value={costForm.amount}
+                    onChange={(e) => setCostForm({ ...costForm, amount: Number(e.target.value) })}
+                    className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-mono font-bold text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-slate-700 block">Vendor / Contractor Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Skyline Glass & Wood Specialists"
+                    value={costForm.vendorName}
+                    onChange={(e) => setCostForm({ ...costForm, vendorName: e.target.value })}
+                    className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-medium"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-700 block">Invoice / Receipt Reference</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. INV-2026-8812"
+                    value={costForm.invoiceReceiptRef}
+                    onChange={(e) => setCostForm({ ...costForm, invoiceReceiptRef: e.target.value })}
+                    className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-mono font-medium"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block">Expense Description & Justification *</label>
+                <textarea
+                  rows={2}
+                  required
+                  placeholder="Detail what was purchased, repaired, or compensated to resolve this complaint..."
+                  value={costForm.description}
+                  onChange={(e) => setCostForm({ ...costForm, description: e.target.value })}
+                  className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-medium"
+                />
+              </div>
+
+              <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 space-y-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="companyAbsorptionCheck"
+                    checked={costForm.isCompanyAbsorption}
+                    onChange={(e) => setCostForm({ ...costForm, isCompanyAbsorption: e.target.checked })}
+                    className="rounded border-emerald-400 text-emerald-600"
+                  />
+                  <label htmlFor="companyAbsorptionCheck" className="font-bold text-emerald-900 cursor-pointer">
+                    100% Absorbed by Handy Squad (Company Goodwill Policy)
+                  </label>
+                </div>
+                <p className="text-[10px] text-emerald-700">
+                  Per Section 8, Handy Squad absorbs operational lapses. Automated salary deduction is strictly forbidden.
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowAddCostModal(false)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 font-semibold text-slate-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingCost || !costForm.description.trim()}
+                  className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-sm"
+                >
+                  {submittingCost ? 'Booking...' : 'Book Expense to Ledger'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: EMPLOYEE COACHING & CAREER DOSSIER */}
+      {selectedEmployeeForDetail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl border border-slate-200 space-y-5 my-8 max-h-[92vh] overflow-y-auto animate-fadeIn">
+            <div className="flex justify-between items-start border-b border-slate-100 pb-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">
+                    {selectedEmployeeForDetail.employeeCode}
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-200 text-slate-800">
+                    {selectedEmployeeForDetail.city}
+                  </span>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                    selectedEmployeeForDetail.trainingStatus === 'UP_TO_DATE' 
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                      : 'bg-amber-50 text-amber-700 border border-amber-200'
+                  }`}>
+                    {selectedEmployeeForDetail.trainingStatus.replace(/_/g, ' ')}
+                  </span>
+                </div>
+                <h3 className="text-lg font-bold text-slate-900 mt-1">{selectedEmployeeForDetail.fullName}</h3>
+                <p className="text-xs text-slate-500 font-medium">
+                  {selectedEmployeeForDetail.designation.replace(/_/g, ' ')} · Hired: {selectedEmployeeForDetail.hireDate} · Phone: {selectedEmployeeForDetail.primaryPhone}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedEmployeeForDetail(null)}
+                className="text-slate-400 hover:text-slate-600 text-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Section A: Complaint Participation & Allegation Segregation */}
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                  Case Participation History (Allegations vs Verified Findings)
+                </h4>
+              </div>
+
+              {(() => {
+                const involvedComplaints: { complaint: Complaint; participant: ComplaintParticipant }[] = [];
+                complaints.forEach(c => {
+                  (c.participants || []).forEach(p => {
+                    if (p.employeeId === selectedEmployeeForDetail.id || p.employee?.id === selectedEmployeeForDetail.id) {
+                      involvedComplaints.push({ complaint: c, participant: p });
+                    }
+                  });
+                });
+
+                if (involvedComplaints.length === 0) {
+                  return (
+                    <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs text-emerald-800">
+                      ✓ Zero customer complaints on record. Flawless service delivery score!
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="space-y-2">
+                    {involvedComplaints.map(({ complaint: c, participant: p }) => (
+                      <div key={p.id} className="p-3 rounded-xl border border-slate-200 bg-slate-50 text-xs space-y-1.5">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-bold text-indigo-700">{c.complaintNumber}</span>
+                              <span className="font-semibold text-slate-800">{c.title}</span>
+                            </div>
+                            <span className="text-[10px] text-slate-500">
+                              Role on Job: <strong>{p.roleOnJob.replace(/_/g, ' ')}</strong> · Customer: {c.customerName}
+                            </span>
+                          </div>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                            p.allegationStatus === 'EXONERATED'
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : p.allegationStatus === 'SUBSTANTIATED'
+                                ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                                : 'bg-slate-200 text-slate-800'
+                          }`}>
+                            {p.allegationStatus}
+                          </span>
+                        </div>
+                        {p.statement && (
+                          <p className="text-[11px] text-slate-600 bg-white p-2 rounded-lg border border-slate-100 italic">
+                            Statement: "{p.statement}"
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Section B: Training & Coaching Dossier */}
+            <div className="space-y-3 pt-3 border-t border-slate-100">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                    Technical Coaching & SOP Certification Matrix
+                  </h4>
+                  <p className="text-[11px] text-slate-500">Coaching records restore employee career status upon completion</p>
+                </div>
+                <button
+                  onClick={() => setShowAssignTrainingModal(true)}
+                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-1 shadow-sm"
+                >
+                  <PlusIcon className="w-3.5 h-3.5" />
+                  Assign Coaching Module
+                </button>
+              </div>
+
+              {loadingTraining ? (
+                <div className="p-6 text-center text-xs text-slate-400">Loading coaching records...</div>
+              ) : employeeTrainingList.length > 0 ? (
+                <div className="space-y-2">
+                  {employeeTrainingList.map((t) => (
+                    <div key={t.id} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/80 text-xs space-y-2">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-indigo-700 font-bold">{t.moduleCode}</span>
+                            <span className="font-bold text-slate-900">{t.moduleTitle}</span>
+                          </div>
+                          <span className="text-[10px] text-slate-500 block">
+                            Trainer: {t.trainerName} · Scheduled: {t.scheduledDate} {t.completionDate ? `· Completed: ${t.completionDate}` : ''}
+                          </span>
+                        </div>
+
+                        <div className="text-right">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                            t.status === 'COMPLETED_PASSED'
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-amber-50 text-amber-700 border border-amber-200'
+                          }`}>
+                            {t.status.replace(/_/g, ' ')}
+                          </span>
+                          {t.scorePct !== undefined && t.scorePct > 0 && (
+                            <span className="text-[10px] font-bold text-emerald-700 block font-mono">
+                              Score: {t.scorePct}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {t.notes && (
+                        <p className="text-[11px] text-slate-600 bg-white p-2 rounded-lg border border-slate-100">
+                          {t.notes}
+                        </p>
+                      )}
+
+                      {t.status !== 'COMPLETED_PASSED' && (
+                        <div className="flex justify-end pt-1">
+                          <button
+                            onClick={() => handleCompleteTraining(t.id)}
+                            className="px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] flex items-center gap-1 shadow-xs"
+                          >
+                            <CheckIcon className="w-3 h-3" />
+                            Verify & Mark Module Passed (Score: 96%)
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-6 text-center bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-400">
+                  No active coaching modules assigned. Employee is in good standing.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: ASSIGN TRAINING MODULE */}
+      {showAssignTrainingModal && selectedEmployeeForDetail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-fadeIn">
+            <div className="flex justify-between items-start border-b border-slate-100 pb-2">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Assign Technical Coaching Module</h3>
+                <p className="text-xs text-slate-500">Employee: {selectedEmployeeForDetail.fullName} ({selectedEmployeeForDetail.employeeCode})</p>
+              </div>
+              <button onClick={() => setShowAssignTrainingModal(false)} className="text-slate-400 font-bold">✕</button>
+            </div>
+
+            <form onSubmit={handleAssignTraining} className="space-y-3 text-xs">
+              <div>
+                <label className="font-bold text-slate-700 block">Coaching Category & Curriculum *</label>
+                <select
+                  value={assignTrainingForm.category}
+                  onChange={(e) => {
+                    const cat = e.target.value;
+                    let code = 'SOP-GEN-01';
+                    let title = 'Standard Operating Procedures Review';
+                    if (cat === 'DELICATE_SURFACES') {
+                      code = 'SOP-DEL-01';
+                      title = 'Natural Stone & Acid-Sensitive Surface Protection';
+                    } else if (cat === 'CHEMICAL_SAFETY') {
+                      code = 'SOP-SAF-01';
+                      title = 'Chemical Dilution, PPE & Ventilation Standards';
+                    } else if (cat === 'CHECKLIST_DOCUMENTATION') {
+                      code = 'SOP-CHK-01';
+                      title = 'Pre-Service Pre-Existing Damage Video Sign-off';
+                    } else if (cat === 'MACHINE_OPERATION') {
+                      code = 'SOP-MCH-01';
+                      title = 'Single Disc Scrubber & Jet Washer Maintenance';
+                    } else if (cat === 'CUSTOMER_COMMUNICATION') {
+                      code = 'SOP-COM-01';
+                      title = 'Client Expectation Management & De-escalation';
+                    } else if (cat === 'TIME_MANAGEMENT') {
+                      code = 'SOP-TIM-01';
+                      title = 'Transit Route Optimization & On-Time Arrival';
+                    }
+                    setAssignTrainingForm({ ...assignTrainingForm, category: cat, moduleCode: code, moduleTitle: title });
+                  }}
+                  className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-bold bg-white"
+                >
+                  <option value="DELICATE_SURFACES">Natural Stone & Delicate Surfaces SOP</option>
+                  <option value="CHEMICAL_SAFETY">Chemical Dilution & Flooring Safety</option>
+                  <option value="CHECKLIST_DOCUMENTATION">Pre-Service Inspection Video Sign-off</option>
+                  <option value="MACHINE_OPERATION">Single Disc Scrubber & Jet Operation</option>
+                  <option value="CUSTOMER_COMMUNICATION">Customer Communication & De-escalation</option>
+                  <option value="TIME_MANAGEMENT">Route Transit & On-Time Arrival</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block">Module Title</label>
+                <input
+                  type="text"
+                  required
+                  value={assignTrainingForm.moduleTitle}
+                  onChange={(e) => setAssignTrainingForm({ ...assignTrainingForm, moduleTitle: e.target.value })}
+                  className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-medium"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-slate-700 block">Master Trainer</label>
+                  <input
+                    type="text"
+                    required
+                    value={assignTrainingForm.trainerName}
+                    onChange={(e) => setAssignTrainingForm({ ...assignTrainingForm, trainerName: e.target.value })}
+                    className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-medium"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-700 block">Scheduled Date</label>
+                  <input
+                    type="date"
+                    required
+                    value={assignTrainingForm.scheduledDate}
+                    onChange={(e) => setAssignTrainingForm({ ...assignTrainingForm, scheduledDate: e.target.value })}
+                    className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-medium"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block">Coaching Notes & Specific Focus Areas</label>
+                <textarea
+                  rows={2}
+                  placeholder="e.g. Focus on pH-neutral cleaner application on Italian marble and corner tape masking..."
+                  value={assignTrainingForm.notes}
+                  onChange={(e) => setAssignTrainingForm({ ...assignTrainingForm, notes: e.target.value })}
+                  className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-medium"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowAssignTrainingModal(false)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingTraining}
+                  className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
+                >
+                  {submittingTraining ? 'Assigning...' : 'Assign Module'}
                 </button>
               </div>
             </form>

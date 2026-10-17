@@ -18,7 +18,8 @@ import {
   ComplaintCategory,
   ComplaintSeverity,
   ComplaintStatus,
-  EvidenceType
+  EvidenceType,
+  TrainingRecord
 } from '../types/complaints';
 
 // Category Mandatory & Recommended Evidence Rules per Engineering Spec (Section 6 & 7)
@@ -1052,6 +1053,161 @@ export async function updateCorrectiveActionStatus(
     return res.ok;
   } catch (err) {
     console.error('updateCorrectiveActionStatus error:', err);
+    return false;
+  }
+}
+
+// ==========================================
+// PHASE 5: COSTS & FINANCIAL WORKFLOW
+// ==========================================
+
+// Fetch Granular Cost Records
+export async function fetchComplaintCosts(complaintId: string): Promise<CostRecord[]> {
+  try {
+    const res = await fetch(`/api/complaints/${complaintId}/costs`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.costs)) return data.costs;
+    }
+  } catch (err) {
+    console.warn('fetchComplaintCosts error:', err);
+  }
+  return [];
+}
+
+// Add New Cost / Expense Item
+export async function addComplaintCost(complaintId: string, payload: Partial<CostRecord>): Promise<CostRecord | null> {
+  try {
+    const res = await fetch(`/api/complaints/${complaintId}/costs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.cost || null;
+    }
+  } catch (err) {
+    console.error('addComplaintCost error:', err);
+  }
+  return null;
+}
+
+// Verify Expense / Mark Incurred
+export async function verifyComplaintCost(
+  complaintId: string,
+  costId: string,
+  status: string,
+  approvedEmployeeShare?: number,
+  verifiedByName?: string
+): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/complaints/${complaintId}/costs`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ costId, status, approvedEmployeeShare, verifiedByName }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('verifyComplaintCost error:', err);
+    return false;
+  }
+}
+
+// ==========================================
+// PHASE 5: EXECUTIVE APPROVALS WORKFLOW
+// ==========================================
+
+// Fetch Complaint Approvals History
+export async function fetchComplaintApprovals(complaintId: string): Promise<ApprovalRecord[]> {
+  try {
+    const res = await fetch(`/api/complaints/${complaintId}/approvals`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.approvals)) return data.approvals;
+    }
+  } catch (err) {
+    console.warn('fetchComplaintApprovals error:', err);
+  }
+  return [];
+}
+
+// Submit Multi-level Approval Decision
+export async function submitApprovalDecision(
+  complaintId: string,
+  payload: Partial<ApprovalRecord>
+): Promise<{ approval: ApprovalRecord; nextStatus?: string } | null> {
+  try {
+    const res = await fetch(`/api/complaints/${complaintId}/approvals`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data;
+    }
+  } catch (err) {
+    console.error('submitApprovalDecision error:', err);
+  }
+  return null;
+}
+
+// ==========================================
+// PHASE 5: EMPLOYEE TRAINING & COACHING
+// ==========================================
+
+// Fetch Employee Training History
+export async function fetchEmployeeTrainingRecords(employeeId: string): Promise<TrainingRecord[]> {
+  try {
+    const res = await fetch(`/api/employees/${employeeId}/training`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.trainingRecords)) return data.trainingRecords;
+    }
+  } catch (err) {
+    console.warn('fetchEmployeeTrainingRecords error:', err);
+  }
+  return [];
+}
+
+// Assign Coaching Module
+export async function assignEmployeeTraining(
+  employeeId: string,
+  payload: Partial<TrainingRecord>
+): Promise<TrainingRecord | null> {
+  try {
+    const res = await fetch(`/api/employees/${employeeId}/training`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.trainingRecord || null;
+    }
+  } catch (err) {
+    console.error('assignEmployeeTraining error:', err);
+  }
+  return null;
+}
+
+// Complete Training Module & Re-test
+export async function completeEmployeeTraining(
+  employeeId: string,
+  trainingId: string,
+  scorePct: number,
+  notes?: string
+): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/employees/${employeeId}/training`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trainingId, status: 'COMPLETED_PASSED', scorePct, notes }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('completeEmployeeTraining error:', err);
     return false;
   }
 }

@@ -24,9 +24,10 @@ import TimelineLineChart from '../components/TimelineLineChart';
 import WhatIfCalculator from '../components/WhatIfCalculator';
 import ConsistencyReport from '../components/ConsistencyReport';
 import CustomTrackingApp from '../components/CustomTrackingApp';
+import ComplaintManagementApp from '../components/ComplaintManagementApp';
 
 export default function App() {
-  const [selectedApp, setSelectedApp] = useState<'economic-calculator' | 'custom-tracker'>('economic-calculator');
+  const [selectedApp, setSelectedApp] = useState<'economic-calculator' | 'complaint-management'>('economic-calculator');
   const [isAppSwitcherOpen, setIsAppSwitcherOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('Dashboard');
   const [activeTrackerTab, setActiveTrackerTab] = useState('Overview');
@@ -529,18 +530,18 @@ export default function App() {
           >
             <div className="flex items-center gap-3 min-w-0">
               <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-sm ${
-                selectedApp === 'economic-calculator' ? 'bg-indigo-600 text-white' : 'bg-emerald-600 text-white'
+                selectedApp === 'economic-calculator' ? 'bg-indigo-600 text-white' : 'bg-rose-600 text-white'
               }`}>
                 {selectedApp === 'economic-calculator' ? (
                   <MixerHorizontalIcon className="w-5 h-5" />
                 ) : (
-                  <ActivityLogIcon className="w-5 h-5" />
+                  <ExclamationTriangleIcon className="w-5 h-5" />
                 )}
               </div>
               <div className="truncate">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Handy Squad Suite</span>
                 <span className="text-xs font-bold text-slate-900 truncate block">
-                  {selectedApp === 'economic-calculator' ? 'Economic Calculator' : 'Custom Tracking App'}
+                  {selectedApp === 'economic-calculator' ? 'Economic Calculator' : 'Complaint Management'}
                 </span>
               </div>
             </div>
@@ -585,32 +586,32 @@ export default function App() {
                 </div>
               </button>
 
-              {/* App 2: Custom Tracking App */}
+              {/* App 2: Complaint Management Hub */}
               <button
                 onClick={() => {
-                  setSelectedApp('custom-tracker');
+                  setSelectedApp('complaint-management');
                   setIsAppSwitcherOpen(false);
                 }}
                 className={`w-full flex items-start gap-2.5 p-2.5 rounded-xl text-left transition-all ${
-                  selectedApp === 'custom-tracker' 
-                    ? 'bg-emerald-50/80 border border-emerald-200 shadow-sm' 
+                  selectedApp === 'complaint-management' 
+                    ? 'bg-rose-50/80 border border-rose-200 shadow-sm' 
                     : 'hover:bg-slate-50 border border-transparent'
                 }`}
               >
-                <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 mt-0.5">
-                  <ActivityLogIcon className="w-4 h-4" />
+                <div className="w-7 h-7 rounded-lg bg-rose-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                  <ExclamationTriangleIcon className="w-4 h-4" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-900 truncate">Custom Tracking App</span>
-                    {selectedApp === 'custom-tracker' ? (
-                      <span className="text-[9px] font-bold bg-emerald-600 text-white px-1.5 py-0.5 rounded-full">Active</span>
+                    <span className="text-xs font-bold text-slate-900 truncate">Complaint Management</span>
+                    {selectedApp === 'complaint-management' ? (
+                      <span className="text-[9px] font-bold bg-rose-600 text-white px-1.5 py-0.5 rounded-full">Active</span>
                     ) : (
-                      <span className="text-[9px] font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full">Next Up</span>
+                      <span className="text-[9px] font-bold bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded-full">Production</span>
                     )}
                   </div>
                   <p className="text-[10px] text-slate-500 mt-0.5 leading-tight">
-                    Dedicated tracking application (ready for next prompt)
+                    Kerala operations, investigations, approvals & costs
                   </p>
                 </div>
               </button>
@@ -834,10 +835,9 @@ export default function App() {
         )}
 
         {/* Dynamic Content Views */}
-        {selectedApp === 'custom-tracker' ? (
-          <CustomTrackingApp 
+        {selectedApp === 'complaint-management' ? (
+          <ComplaintManagementApp 
             onSwitchToEconomicCalculator={() => setSelectedApp('economic-calculator')} 
-            activeTab={activeTrackerTab} 
           />
         ) : (
           <div className="flex-1 overflow-auto p-8">

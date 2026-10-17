@@ -8,6 +8,7 @@ import {
   AssessmentStatus, 
   CorrectiveActionType,
   ComplaintCategory,
+  ComplaintSeverity,
   EvidenceType
 } from '../types/complaints';
 import { CATEGORY_EVIDENCE_RULES } from './complaintsService';
@@ -28,6 +29,24 @@ export interface ResponsibilityEvaluationResult {
   recommendedCorrectiveActionType: CorrectiveActionType;
   requiredApprovalAuthority: 'OPERATIONS_MANAGER' | 'COO' | 'MANAGEMENT_ADMIN';
   ruleVersion: number;
+}
+
+/**
+ * Determines Required Executive Approval Authority based on financial exposure & category severity
+ * Minor loss (<= ₹5,000) -> OPERATIONS_MANAGER
+ * Moderate loss (₹5,000 - ₹15,000) -> COO
+ * Major/Critical loss (> ₹15,000 or CRITICAL severity) -> MANAGEMENT_ADMIN
+ */
+export function determineRequiredApprovalAuthority(
+  severity: ComplaintSeverity,
+  totalExposure: number
+): 'OPERATIONS_MANAGER' | 'COO' | 'MANAGEMENT_ADMIN' {
+  if (severity === 'CRITICAL' || totalExposure > 15000) {
+    return 'MANAGEMENT_ADMIN';
+  } else if (severity === 'MAJOR' || totalExposure >= 5000) {
+    return 'COO';
+  }
+  return 'OPERATIONS_MANAGER';
 }
 
 /**
@@ -65,12 +84,7 @@ export function evaluateResponsibility(
   const totalExposure = Math.max(totalVerifiedCost, totalEstimatedCost, complaint.jobValue * 0.5);
 
   // Determine Approval Authority based on financial exposure & category severity
-  let requiredApprovalAuthority: 'OPERATIONS_MANAGER' | 'COO' | 'MANAGEMENT_ADMIN' = 'OPERATIONS_MANAGER';
-  if (complaint.severity === 'CRITICAL' || totalExposure > 15000) {
-    requiredApprovalAuthority = 'MANAGEMENT_ADMIN';
-  } else if (complaint.severity === 'MAJOR' || totalExposure > 5000) {
-    requiredApprovalAuthority = 'COO';
-  }
+  const requiredApprovalAuthority = determineRequiredApprovalAuthority(complaint.severity, totalExposure);
 
   // Summary of Evidence Reviewed
   const evidenceReviewedSummary = [

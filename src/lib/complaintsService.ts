@@ -1212,6 +1212,23 @@ export async function completeEmployeeTraining(
   }
 }
 
+// ==========================================
+// PHASE 6: AUDIT TRAIL QUERY SERVICE
+// ==========================================
+export async function fetchAuditLogs(complaintId?: string): Promise<any[]> {
+  try {
+    const url = complaintId ? `/api/audit?complaintId=${encodeURIComponent(complaintId)}` : '/api/audit';
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.auditRecords)) return data.auditRecords;
+    }
+  } catch (err) {
+    console.warn('fetchAuditLogs error:', err);
+  }
+  return [];
+}
+
 export function exportComplaintsToCSV(complaints: Complaint[]) {
   const headers = [
     'Complaint Number',

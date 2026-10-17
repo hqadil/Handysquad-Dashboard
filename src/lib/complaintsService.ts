@@ -492,3 +492,100 @@ function mapDbComplaintToFrontend(c: any): Complaint {
     })),
   };
 }
+
+export async function updateComplaintStatus(id: string, status: ComplaintStatus, closureNotes?: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/complaints/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, closureNotes }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('updateComplaintStatus error:', err);
+    return false;
+  }
+}
+
+export async function assignComplaintInvestigator(id: string, investigatorId: string, investigatorName: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/complaints/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        assignedInvestigatorId: investigatorId,
+        assignedInvestigatorName: investigatorName,
+        status: 'UNDER_INVESTIGATION'
+      }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('assignComplaintInvestigator error:', err);
+    return false;
+  }
+}
+
+export async function addComplaintComment(id: string, comment: { authorName: string; authorRole: string; commentText: string }): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/complaints/${id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(comment),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('addComplaintComment error:', err);
+    return false;
+  }
+}
+
+export function exportComplaintsToCSV(complaints: Complaint[]) {
+  const headers = [
+    'Complaint Number',
+    'Date Reported',
+    'Customer Name',
+    'Customer Phone',
+    'City',
+    'Service Type',
+    'Category',
+    'Severity',
+    'Status',
+    'Job Value (INR)',
+    'Investigator',
+    'Title',
+    'Pre-Checklist',
+    'Post-Signoff',
+    'Verified Loss (INR)',
+  ];
+
+  const rows = complaints.map(c => {
+    const totalLoss = (c.costs || []).reduce((acc, cost) => acc + (cost.status === 'VERIFIED_INCURRED' ? cost.amount : 0), 0);
+    return [
+      `"${c.complaintNumber}"`,
+      `"${new Date(c.reportingDate).toISOString().split('T')[0]}"`,
+      `"${c.customerName.replace(/"/g, '""')}"`,
+      `"${c.customerPhone}"`,
+      `"${c.city}"`,
+      `"${c.serviceType}"`,
+      `"${c.category}"`,
+      `"${c.severity}"`,
+      `"${c.status}"`,
+      c.jobValue,
+      `"${(c.assignedInvestigatorName || '').replace(/"/g, '""')}"`,
+      `"${c.title.replace(/"/g, '""')}"`,
+      c.preServiceChecklistDone ? 'YES' : 'NO',
+      c.postServiceSignoffDone ? 'YES' : 'NO',
+      totalLoss,
+    ].join(',');
+  });
+
+  const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows].join('\n');
+  const encodedUri = encodeURI(csvContent);
+  const link = document.createElement('a');
+  link.setAttribute('href', encodedUri);
+  link.setAttribute('download', `Handy_Squad_Complaints_Register_${new Date().toISOString().split('T')[0]}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+

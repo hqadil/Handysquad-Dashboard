@@ -951,6 +951,111 @@ export async function updateParticipantStatement(
   }
 }
 
+// Evaluate Complaint Responsibility (Automated Engine)
+export async function evaluateComplaintResponsibility(complaintId: string): Promise<any> {
+  try {
+    const res = await fetch(`/api/complaints/${complaintId}/assessment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'evaluate' }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.evaluation || null;
+    }
+  } catch (err) {
+    console.error('evaluateComplaintResponsibility error:', err);
+  }
+  return null;
+}
+
+// Confirm & Record Responsibility Assessment
+export async function confirmComplaintAssessment(
+  complaintId: string,
+  assessmentData: Partial<ResponsibilityAssessment> & { recommendedCorrectiveActionType?: string }
+): Promise<ResponsibilityAssessment | null> {
+  try {
+    const res = await fetch(`/api/complaints/${complaintId}/assessment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'confirm', ...assessmentData }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.assessment || null;
+    }
+  } catch (err) {
+    console.error('confirmComplaintAssessment error:', err);
+  }
+  return null;
+}
+
+// Fetch Assessments History
+export async function fetchComplaintAssessments(complaintId: string): Promise<ResponsibilityAssessment[]> {
+  try {
+    const res = await fetch(`/api/complaints/${complaintId}/assessment`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.assessments)) return data.assessments;
+    }
+  } catch (err) {
+    console.warn('fetchComplaintAssessments error:', err);
+  }
+  return [];
+}
+
+// Fetch Corrective Actions
+export async function fetchCorrectiveActions(complaintId: string): Promise<any[]> {
+  try {
+    const res = await fetch(`/api/complaints/${complaintId}/corrective-actions`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.correctiveActions)) return data.correctiveActions;
+    }
+  } catch (err) {
+    console.warn('fetchCorrectiveActions error:', err);
+  }
+  return [];
+}
+
+// Create Corrective Action
+export async function createCorrectiveAction(complaintId: string, payload: any): Promise<any> {
+  try {
+    const res = await fetch(`/api/complaints/${complaintId}/corrective-actions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.correctiveAction || null;
+    }
+  } catch (err) {
+    console.error('createCorrectiveAction error:', err);
+  }
+  return null;
+}
+
+// Update Corrective Action Status
+export async function updateCorrectiveActionStatus(
+  complaintId: string,
+  actionId: string,
+  status: string,
+  verificationNotes?: string
+): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/complaints/${complaintId}/corrective-actions`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actionId, status, verificationNotes }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('updateCorrectiveActionStatus error:', err);
+    return false;
+  }
+}
+
 export function exportComplaintsToCSV(complaints: Complaint[]) {
   const headers = [
     'Complaint Number',

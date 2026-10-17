@@ -1,5 +1,5 @@
 // src/components/ComplaintManagementApp.tsx
-// HANDY SQUAD: COMPLAINT MANAGEMENT PLATFORM (PHASE 3 - EVIDENCE VAULT, INVESTIGATION ENGINE & WORKFLOWS)
+// HANDY SQUAD: COMPLAINT MANAGEMENT PLATFORM (PHASE 4 - RESPONSIBILITY ENGINE & CORRECTIVE ACTIONS)
 
 import React, { useState, useEffect, useMemo } from 'react';
 import {
@@ -22,6 +22,7 @@ import {
   ClockIcon,
   DownloadIcon,
   ArrowTopRightIcon,
+  CheckIcon,
 } from '@radix-ui/react-icons';
 import { 
   Complaint, 
@@ -35,7 +36,13 @@ import {
   ComplaintEvidence,
   EvidenceType,
   InvestigationRecord,
-  ComplaintParticipant
+  ComplaintParticipant,
+  ResponsibilityAssessment,
+  ResponsibleParty,
+  AssessmentStatus,
+  CorrectiveAction,
+  CorrectiveActionType,
+  CorrectiveActionStatus
 } from '../types/complaints';
 import { 
   fetchComplaints, 
@@ -51,9 +58,16 @@ import {
   fetchInvestigationRecord,
   saveInvestigationRecord,
   updateParticipantStatement,
+  evaluateComplaintResponsibility,
+  confirmComplaintAssessment,
+  fetchComplaintAssessments,
+  fetchCorrectiveActions,
+  createCorrectiveAction,
+  updateCorrectiveActionStatus,
   CATEGORY_EVIDENCE_RULES
 } from '../lib/complaintsService';
 import { formatINR } from '../lib/finance';
+import { ResponsibilityEvaluationResult } from '../lib/responsibilityEngine';
 
 interface ComplaintManagementAppProps {
   onSwitchToEconomicCalculator: () => void;
@@ -108,6 +122,26 @@ const EVIDENCE_TYPE_LABELS: Record<EvidenceType, string> = {
   OTHER_DOCUMENT: 'Supporting Document',
 };
 
+const RESPONSIBLE_PARTY_LABELS: Record<ResponsibleParty, { label: string; bg: string; text: string }> = {
+  COMPANY: { label: 'Company Absorption (Operational Overhead)', bg: 'bg-rose-50', text: 'text-rose-700' },
+  EMPLOYEE_INDIVIDUAL: { label: 'Employee Individual (Coaching/Retraining)', bg: 'bg-amber-50', text: 'text-amber-700' },
+  CREW_SHARED: { label: 'Crew Shared Responsibility', bg: 'bg-orange-50', text: 'text-orange-700' },
+  CUSTOMER: { label: 'Customer (Pre-Existing / Scope Gap)', bg: 'bg-blue-50', text: 'text-blue-700' },
+  THIRD_PARTY_VENDOR: { label: 'Third-Party Contractor / Vendor', bg: 'bg-purple-50', text: 'text-purple-700' },
+  NO_FAULT_GOODWILL: { label: 'No-Fault Goodwill Decision', bg: 'bg-emerald-50', text: 'text-emerald-700' },
+};
+
+const CORRECTIVE_ACTION_LABELS: Record<CorrectiveActionType, string> = {
+  REWORK_SERVICE: 'Complimentary Rework Pass',
+  APOLOGY_CALL_VISIT: 'Senior Lead Apology & Courtesy Visit',
+  TRAINING_ASSIGNMENT: 'Targeted Skill / Chemical Coaching',
+  SOP_PROCESS_UPDATE: 'SOP & Scope Policy Update',
+  EQUIPMENT_OVERHAUL: 'Machinery Overhaul & Filter Replacement',
+  SUPERVISION_AUDIT: 'Field Supervision Spot Audit',
+  DOCUMENTATION_POLICY_MANDATE: 'Pre-Service Documentation Mandate',
+  COACHING_COUNSELING: '1-on-1 Performance Counseling',
+};
+
 const ROOT_CAUSE_CATEGORIES = [
   { id: 'INDIVIDUAL_SKILL_GAP', label: 'Individual Skill / Technique Gap' },
   { id: 'INSUFFICIENT_TIME_ALLOCATION', label: 'Insufficient Time Allocation / Rushed Job' },
@@ -125,7 +159,7 @@ const ROOT_CAUSE_CATEGORIES = [
 export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }: ComplaintManagementAppProps) {
   // Navigation Section
   const [activeSubTab, setActiveSubTab] = useState<
-    'Dashboard' | 'Register' | 'Evidence Centre' | 'Approvals' | 'Employees' | 'Financial' | 'Rules'
+    'Dashboard' | 'Register' | 'Evidence Centre' | 'Responsibility Review' | 'Approvals' | 'Employees' | 'Financial' | 'Rules'
   >('Dashboard');
 
   // Quick Preset Filter for Register
@@ -157,7 +191,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
 
   // Selected Complaint for Deep Inspection Drawer
   const [selectedComplaint, setSelectedComplaint] = useState<Complaint | null>(null);
-  const [drawerActiveTab, setDrawerActiveTab] = useState<'overview' | 'crew' | 'evidence' | 'investigation' | 'financial' | 'actions'>('overview');
+  const [drawerActiveTab, setDrawerActiveTab] = useState<'overview' | 'crew' | 'evidence' | 'investigation' | 'assessment' | 'corrective' | 'financial' | 'actions'>('overview');
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [newCommentText, setNewCommentText] = useState('');
   const [commentSubmitting, setCommentSubmitting] = useState(false);
@@ -178,7 +212,31 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
   });
   const [savingInvestigation, setSavingInvestigation] = useState(false);
 
-  // Upload Evidence Modal State inside Drawer / Evidence Centre
+  // Responsibility Assessment State inside Drawer & Review
+  const [assessmentsList, setAssessmentsList] = useState<ResponsibilityAssessment[]>([]);
+  const [provisionalEvaluation, setProvisionalEvaluation] = useState<ResponsibilityEvaluationResult | null>(null);
+  const [evaluatingResponsibility, setEvaluatingResponsibility] = useState(false);
+  const [confirmingAssessment, setConfirmingAssessment] = useState(false);
+
+  // Corrective Actions State inside Drawer
+  const [correctiveActionsList, setCorrectiveActionsList] = useState<CorrectiveAction[]>([]);
+  const [showAddCorrectiveModal, setShowAddCorrectiveModal] = useState(false);
+  const [newCorrectiveForm, setNewCorrectiveForm] = useState<{
+    actionType: CorrectiveActionType;
+    title: string;
+    description: string;
+    assignedToEmployeeId: string;
+    dueDate: string;
+  }>({
+    actionType: 'REWORK_SERVICE',
+    title: '',
+    description: '',
+    assignedToEmployeeId: '',
+    dueDate: new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0],
+  });
+  const [savingCorrective, setSavingCorrective] = useState(false);
+
+  // Upload Evidence Modal State
   const [showUploadEvidenceModal, setShowUploadEvidenceModal] = useState(false);
   const [targetComplaintForUpload, setTargetComplaintForUpload] = useState<string>('');
   const [uploadEvidenceForm, setUploadEvidenceForm] = useState<{
@@ -288,14 +346,16 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     loadData();
   }, [selectedCity, selectedCategory, selectedSeverity, selectedStatus, searchQuery]);
 
-  // Load Investigation & Evidence when a Complaint is selected
+  // Load Investigation, Evidence, Assessments, and Corrective Actions for Selected Complaint
   useEffect(() => {
     if (!selectedComplaint) return;
     async function loadDetails() {
       try {
-        const [inv, evList] = await Promise.all([
+        const [inv, evList, asList, caList] = await Promise.all([
           fetchInvestigationRecord(selectedComplaint!.id),
           fetchComplaintEvidence(selectedComplaint!.id),
+          fetchComplaintAssessments(selectedComplaint!.id),
+          fetchCorrectiveActions(selectedComplaint!.id),
         ]);
         if (inv) {
           setInvestigationData(inv);
@@ -317,6 +377,8 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
         if (evList && evList.length > 0) {
           setSelectedComplaint(prev => prev ? { ...prev, evidence: evList } : null);
         }
+        setAssessmentsList(asList || []);
+        setCorrectiveActionsList(caList || []);
       } catch (err) {
         console.warn('Error loading complaint details:', err);
       }
@@ -327,10 +389,6 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
   // City-filtered Employees for dropdowns
   const availableSupervisors = useMemo(() => {
     return employees.filter(e => e.city === newForm.city && e.designation === 'SUPERVISOR');
-  }, [employees, newForm.city]);
-
-  const availableTechnicians = useMemo(() => {
-    return employees.filter(e => e.city === newForm.city && (e.designation === 'SENIOR_TECHNICIAN' || e.designation === 'TECHNICIAN'));
   }, [employees, newForm.city]);
 
   // Filtered and Sorted Complaints for Register
@@ -437,7 +495,109 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     };
   };
 
-  // Handle File Input Selection
+  // Run Server-side Responsibility Engine
+  const handleRunResponsibilityEngine = async (complaintId?: string) => {
+    const targetId = complaintId || selectedComplaint?.id;
+    if (!targetId) return;
+
+    setEvaluatingResponsibility(true);
+    try {
+      const evaluation = await evaluateComplaintResponsibility(targetId);
+      if (evaluation) {
+        setProvisionalEvaluation(evaluation);
+      }
+    } catch (err) {
+      console.error('Error running responsibility engine:', err);
+    } finally {
+      setEvaluatingResponsibility(false);
+    }
+  };
+
+  // Confirm and Record Assessment to Database
+  const handleConfirmAssessment = async () => {
+    if (!selectedComplaint || !provisionalEvaluation) return;
+
+    setConfirmingAssessment(true);
+    try {
+      const recorded = await confirmComplaintAssessment(selectedComplaint.id, {
+        assessmentStatus: provisionalEvaluation.assessmentStatus,
+        primaryResponsibleParty: provisionalEvaluation.primaryResponsibleParty,
+        companySharePct: provisionalEvaluation.companySharePct,
+        employeeSharePct: provisionalEvaluation.employeeSharePct,
+        responsibleEmployeeId: provisionalEvaluation.responsibleEmployeeId,
+        rationale: provisionalEvaluation.rationale,
+        evidenceReviewedSummary: provisionalEvaluation.evidenceReviewedSummary,
+        conflictingEvidenceNotes: provisionalEvaluation.conflictingEvidenceNotes,
+        recommendedCorrectiveAction: provisionalEvaluation.recommendedCorrectiveAction,
+        recommendedCorrectiveActionType: provisionalEvaluation.recommendedCorrectiveActionType,
+        requiredApprovalAuthority: provisionalEvaluation.requiredApprovalAuthority,
+        assessedByName: 'Operations Lead (Investigation Desk)',
+      });
+
+      if (recorded) {
+        alert('Responsibility Assessment Confirmed & Submitted to Executive Approval Queue!');
+        setAssessmentsList([recorded, ...assessmentsList]);
+        setComplaints(prev => prev.map(c => c.id === selectedComplaint.id ? { ...c, status: 'APPROVAL_PENDING' } : c));
+        setSelectedComplaint(prev => prev ? { ...prev, status: 'APPROVAL_PENDING' } : null);
+        setProvisionalEvaluation(null);
+
+        // Refresh corrective actions
+        const ca = await fetchCorrectiveActions(selectedComplaint.id);
+        setCorrectiveActionsList(ca);
+      }
+    } catch (err) {
+      console.error('Failed to confirm assessment:', err);
+    } finally {
+      setConfirmingAssessment(false);
+    }
+  };
+
+  // Create Corrective Action
+  const handleCreateCorrectiveActionSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedComplaint) return;
+
+    setSavingCorrective(true);
+    try {
+      const created = await createCorrectiveAction(selectedComplaint.id, newCorrectiveForm);
+      if (created) {
+        setCorrectiveActionsList([created, ...correctiveActionsList]);
+        setShowAddCorrectiveModal(false);
+        setNewCorrectiveForm({
+          actionType: 'REWORK_SERVICE',
+          title: '',
+          description: '',
+          assignedToEmployeeId: '',
+          dueDate: new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0],
+        });
+        alert('Corrective Action assigned successfully!');
+      }
+    } catch (err) {
+      console.error('Error creating corrective action:', err);
+    } finally {
+      setSavingCorrective(false);
+    }
+  };
+
+  // Toggle Corrective Action Status
+  const handleToggleCorrectiveActionStatus = async (actionId: string, nextStatus: CorrectiveActionStatus) => {
+    if (!selectedComplaint) return;
+    try {
+      const ok = await updateCorrectiveActionStatus(
+        selectedComplaint.id,
+        actionId,
+        nextStatus,
+        nextStatus === 'VERIFIED_EFFECTIVE' ? 'Inspected and verified effective by Operations Lead' : undefined
+      );
+      if (ok) {
+        setCorrectiveActionsList(prev => prev.map(ca => ca.id === actionId ? { ...ca, status: nextStatus } : ca));
+      }
+    } catch (err) {
+      console.error('Error updating corrective action status:', err);
+    }
+  };
+
+  // File Input Selection
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -456,7 +616,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     reader.readAsDataURL(file);
   };
 
-  // Handle Evidence Upload Submit
+  // Evidence Upload Submit
   const handleEvidenceUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const targetId = targetComplaintForUpload || selectedComplaint?.id;
@@ -466,7 +626,6 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     try {
       const newEv = await uploadComplaintEvidence(targetId, uploadEvidenceForm);
       if (newEv) {
-        // Update local complaint evidence
         setComplaints(prev => prev.map(c => {
           if (c.id === targetId) {
             const updatedEv = [newEv, ...(c.evidence || [])];
@@ -513,7 +672,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     }
   };
 
-  // Handle Evidence Verification Submit
+  // Evidence Verification Submit
   const handleVerifyEvidenceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!verifyingEvidenceItem) return;
@@ -527,7 +686,6 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
         verificationNotesInput.trim() || 'Verified against job work order'
       );
       if (ok) {
-        // Update local state
         setComplaints(prev => prev.map(c => {
           if (c.id === verifyingEvidenceItem.complaintId) {
             return {
@@ -557,7 +715,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     }
   };
 
-  // Handle Save Investigation Record
+  // Save Investigation Record
   const handleSaveInvestigation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedComplaint) return;
@@ -570,7 +728,6 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
       });
       if (saved) {
         alert('Investigation findings & root cause analysis successfully recorded!');
-        // Refresh complaint status in state
         setComplaints(prev => prev.map(c => {
           if (c.id === selectedComplaint.id) {
             return {
@@ -592,7 +749,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     }
   };
 
-  // Handle Record Participant Statement
+  // Save Participant Statement
   const handleSaveParticipantStatement = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedComplaint || !recordingStatementParticipant) return;
@@ -606,7 +763,6 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
         allegationStatusChoice
       );
       if (ok) {
-        // Update local complaint participants
         const updatedParticipants = (selectedComplaint.participants || []).map(p => 
           p.id === recordingStatementParticipant.id ? { ...p, statement: statementText, allegationStatus: allegationStatusChoice } : p
         );
@@ -621,7 +777,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     }
   };
 
-  // Handle Register Complaint Submission
+  // Register Complaint Submission
   const handleRegisterComplaint = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
@@ -678,7 +834,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     }
   };
 
-  // Handle Status Update in Detail Drawer
+  // Status Change in Detail Drawer
   const handleStatusChange = async (newStatus: ComplaintStatus) => {
     if (!selectedComplaint) return;
     setUpdatingStatus(true);
@@ -694,7 +850,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     }
   };
 
-  // Handle Investigator Assignment
+  // Investigator Assignment
   const handleAssignInvestigator = async (empId: string, empName: string) => {
     if (!selectedComplaint) return;
     try {
@@ -715,7 +871,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     }
   };
 
-  // Handle Comment Submission
+  // Comment Submission
   const handleAddComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedComplaint || !newCommentText.trim()) return;
@@ -739,7 +895,8 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
     { id: 'Dashboard', label: 'Management Dashboard', icon: BarChartIcon },
     { id: 'Register', label: 'Complaint Register', icon: TableIcon },
     { id: 'Evidence Centre', label: 'Evidence Centre', icon: ArchiveIcon },
-    { id: 'Approvals', label: 'Approval Centre', icon: TargetIcon },
+    { id: 'Responsibility Review', label: 'Responsibility Review', icon: TargetIcon },
+    { id: 'Approvals', label: 'Approval Centre', icon: CheckCircledIcon },
     { id: 'Employees', label: 'Employee Tracker', icon: PersonIcon },
     { id: 'Financial', label: 'Financial Impact', icon: MixerHorizontalIcon },
     { id: 'Rules', label: 'Rules & Governance', icon: GearIcon },
@@ -805,7 +962,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
 
       {/* Main Sub-Tab Workspace */}
       <div className="flex-1 overflow-y-auto p-8 space-y-6">
-        {/* SUB-TAB 1: MANAGEMENT DASHBOARD (PHASE 2 ANALYTICS) */}
+        {/* SUB-TAB 1: MANAGEMENT DASHBOARD */}
         {activeSubTab === 'Dashboard' && summary && (
           <div className="max-w-7xl mx-auto space-y-6 animate-fadeIn">
             {/* Top Period & Hub Filter Controls */}
@@ -848,7 +1005,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
               </div>
             </div>
 
-            {/* Top KPI Cards Row */}
+            {/* KPI Cards Row */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-5">
               <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-2">
                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Active Complaints</span>
@@ -1070,7 +1227,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
           </div>
         )}
 
-        {/* SUB-TAB 3: EVIDENCE CENTRE (PHASE 3 DEDICATED REPOSITORY) */}
+        {/* SUB-TAB 3: EVIDENCE CENTRE */}
         {activeSubTab === 'Evidence Centre' && (
           <div className="max-w-7xl mx-auto space-y-6 animate-fadeIn">
             {/* Evidence Centre Header & Metrics */}
@@ -1110,40 +1267,6 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
               </div>
             </div>
 
-            {/* Missing Evidence Warnings Alerts */}
-            {missingEvidenceComplaints.length > 0 && (
-              <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl space-y-2">
-                <div className="flex items-center gap-2">
-                  <ExclamationTriangleIcon className="w-4 h-4 text-amber-600" />
-                  <span className="text-xs font-bold text-amber-900">
-                    Category Evidence Alerts ({missingEvidenceComplaints.length} open tickets have missing documentation)
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                  {missingEvidenceComplaints.slice(0, 4).map(c => {
-                    const rule = CATEGORY_EVIDENCE_RULES[c.category];
-                    const uploadedTypes = new Set((c.evidence || []).map(e => e.evidenceType));
-                    const missing = rule.mandatory.filter(m => !uploadedTypes.has(m));
-                    return (
-                      <div key={c.id} className="bg-white p-2.5 rounded-xl border border-amber-200 flex justify-between items-center">
-                        <div>
-                          <span className="font-mono font-bold text-indigo-700">{c.complaintNumber}</span>
-                          <span className="text-slate-600 block text-[11px] font-medium">{c.customerName} ({CATEGORY_LABELS[c.category]})</span>
-                          <span className="text-[10px] text-rose-600 font-bold">Missing: {missing.map(m => EVIDENCE_TYPE_LABELS[m]).join(', ')}</span>
-                        </div>
-                        <button
-                          onClick={() => setSelectedComplaint(c)}
-                          className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-2.5 py-1 rounded-lg"
-                        >
-                          Review →
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
             {/* Evidence Filtering Bar */}
             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-3 text-xs">
               <div className="flex flex-wrap items-center gap-2">
@@ -1182,106 +1305,189 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
                   No evidence files match the selected filters.
                 </div>
               ) : (
-                displayedEvidence.map((ev) => {
-                  const isImage = ev.mimeType.startsWith('image/');
-                  const isAudio = ev.mimeType.startsWith('audio/');
-                  const isPdf = ev.mimeType === 'application/pdf';
+                displayedEvidence.map((ev) => (
+                  <div key={ev.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition flex flex-col justify-between">
+                    <div className="relative bg-slate-100 aspect-video flex items-center justify-center overflow-hidden border-b border-slate-100">
+                      {ev.mimeType.startsWith('image/') && ev.downloadUrl ? (
+                        <img 
+                          src={ev.downloadUrl} 
+                          alt={ev.title} 
+                          className="w-full h-full object-cover cursor-pointer hover:scale-105 transition"
+                          onClick={() => setPreviewingEvidence(ev)}
+                        />
+                      ) : ev.mimeType.startsWith('audio/') ? (
+                        <div className="text-center p-4">
+                          <span className="text-3xl block">🎙️</span>
+                          <span className="text-[11px] font-bold text-slate-600 mt-1 block">Audio / Voice Note</span>
+                        </div>
+                      ) : ev.mimeType === 'application/pdf' ? (
+                        <div className="text-center p-4">
+                          <span className="text-3xl block">📄</span>
+                          <span className="text-[11px] font-bold text-slate-600 mt-1 block">PDF Work Order / Checklist</span>
+                        </div>
+                      ) : (
+                        <FileTextIcon className="w-10 h-10 text-slate-400" />
+                      )}
 
-                  return (
-                    <div key={ev.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition flex flex-col justify-between">
-                      {/* Thumbnail / Header */}
-                      <div className="relative bg-slate-100 aspect-video flex items-center justify-center overflow-hidden border-b border-slate-100">
-                        {isImage && ev.downloadUrl ? (
-                          <img 
-                            src={ev.downloadUrl} 
-                            alt={ev.title} 
-                            className="w-full h-full object-cover cursor-pointer hover:scale-105 transition"
-                            onClick={() => setPreviewingEvidence(ev)}
-                          />
-                        ) : isAudio ? (
-                          <div className="text-center p-4">
-                            <span className="text-3xl block">🎙️</span>
-                            <span className="text-[11px] font-bold text-slate-600 mt-1 block">Audio / Voice Note</span>
-                          </div>
-                        ) : isPdf ? (
-                          <div className="text-center p-4">
-                            <span className="text-3xl block">📄</span>
-                            <span className="text-[11px] font-bold text-slate-600 mt-1 block">PDF Work Order / Checklist</span>
-                          </div>
-                        ) : (
-                          <FileTextIcon className="w-10 h-10 text-slate-400" />
-                        )}
+                      <span className="absolute top-2 left-2 text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-900/80 text-white backdrop-blur-sm">
+                        {EVIDENCE_TYPE_LABELS[ev.evidenceType] || ev.evidenceType}
+                      </span>
 
-                        <span className="absolute top-2 left-2 text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-900/80 text-white backdrop-blur-sm">
-                          {EVIDENCE_TYPE_LABELS[ev.evidenceType] || ev.evidenceType}
+                      {ev.isVerified ? (
+                        <span className="absolute top-2 right-2 text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1 shadow-sm">
+                          <CheckCircledIcon className="w-3 h-3" />
+                          Verified
                         </span>
+                      ) : (
+                        <span className="absolute top-2 right-2 text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-500 text-white shadow-sm">
+                          Unverified
+                        </span>
+                      )}
+                    </div>
 
-                        {ev.isVerified ? (
-                          <span className="absolute top-2 right-2 text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1 shadow-sm">
-                            <CheckCircledIcon className="w-3 h-3" />
-                            Verified
-                          </span>
-                        ) : (
-                          <span className="absolute top-2 right-2 text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-500 text-white shadow-sm">
-                            Unverified
-                          </span>
-                        )}
+                    <div className="p-4 space-y-2 flex-1 flex flex-col justify-between text-xs">
+                      <div>
+                        <div className="flex justify-between items-start">
+                          <span className="text-[10px] font-mono font-bold text-indigo-700">{ev.complaintNumber}</span>
+                          <span className="text-[10px] text-slate-400">{ev.city}</span>
+                        </div>
+                        <h4 className="font-bold text-slate-900 mt-1">{ev.title}</h4>
+                        <p className="text-[11px] text-slate-500 line-clamp-2 mt-0.5">{ev.description || 'No description provided.'}</p>
                       </div>
 
-                      {/* Content details */}
-                      <div className="p-4 space-y-2 flex-1 flex flex-col justify-between">
-                        <div>
-                          <div className="flex justify-between items-start">
-                            <span className="text-[10px] font-mono font-bold text-indigo-700">{ev.complaintNumber}</span>
-                            <span className="text-[10px] text-slate-400">{ev.city}</span>
-                          </div>
-                          <h4 className="text-xs font-bold text-slate-900 mt-1">{ev.title}</h4>
-                          <p className="text-[11px] text-slate-500 line-clamp-2 mt-0.5">{ev.description || 'No description provided.'}</p>
-                        </div>
+                      <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                        {ev.downloadUrl ? (
+                          <button
+                            onClick={() => setPreviewingEvidence(ev)}
+                            className="flex-1 text-center font-bold py-1.5 px-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition"
+                          >
+                            Inspect File
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-slate-400 italic">Private storage only</span>
+                        )}
 
-                        <div className="pt-2 border-t border-slate-100 text-[10px] text-slate-400 space-y-1">
-                          <div className="flex justify-between">
-                            <span>Uploaded by:</span>
-                            <span className="font-semibold text-slate-700">{ev.uploadedByName}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>File Name:</span>
-                            <span className="font-mono text-slate-600 truncate max-w-[150px]">{ev.fileName}</span>
-                          </div>
-                        </div>
-
-                        {/* Action buttons */}
-                        <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
-                          {ev.downloadUrl ? (
-                            <button
-                              onClick={() => setPreviewingEvidence(ev)}
-                              className="flex-1 text-center text-xs font-bold py-1.5 px-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition"
-                            >
-                              Inspect File
-                            </button>
-                          ) : (
-                            <span className="text-[10px] text-slate-400 italic">No public preview</span>
-                          )}
-
-                          {!ev.isVerified && (
-                            <button
-                              onClick={() => setVerifyingEvidenceItem({ complaintId: ev.complaintId, evidenceId: ev.id })}
-                              className="text-xs font-bold py-1.5 px-3 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 transition"
-                            >
-                              Verify ✓
-                            </button>
-                          )}
-                        </div>
+                        {!ev.isVerified && (
+                          <button
+                            onClick={() => setVerifyingEvidenceItem({ complaintId: ev.complaintId, evidenceId: ev.id })}
+                            className="font-bold py-1.5 px-3 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 transition"
+                          >
+                            Verify ✓
+                          </button>
+                        )}
                       </div>
                     </div>
-                  );
-                })
+                  </div>
+                ))
               )}
             </div>
           </div>
         )}
 
-        {/* SUB-TAB 4: APPROVALS */}
+        {/* SUB-TAB 4: RESPONSIBILITY REVIEW (PHASE 4 DEDICATED VIEW) */}
+        {activeSubTab === 'Responsibility Review' && (
+          <div className="max-w-7xl mx-auto space-y-6 animate-fadeIn">
+            {/* Section 8 Legal and Policy Guardrails Banner */}
+            <div className="bg-indigo-900 text-white rounded-2xl p-6 shadow-md flex flex-wrap items-center justify-between gap-4">
+              <div className="space-y-1 max-w-3xl">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-black text-[10px] uppercase tracking-wider">
+                    Governance Standard
+                  </span>
+                  <h3 className="text-sm font-bold">Handy Squad Evidence-Based Responsibility Engine</h3>
+                </div>
+                <p className="text-xs text-indigo-200 leading-relaxed">
+                  Automatic deduction of salary or incentives is strictly prohibited under Master Specification Section 8. 
+                  Any financial adjustment proposal mandates documented evidence, employee statement review, and dual executive authorization.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono bg-indigo-800/80 px-3 py-1.5 rounded-xl border border-indigo-700 text-indigo-200">
+                  Engine Version 1.0 (Active)
+                </span>
+              </div>
+            </div>
+
+            {/* Complaints Evaluation Matrix */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {complaints.map((c) => {
+                const rule = CATEGORY_EVIDENCE_RULES[c.category];
+                return (
+                  <div key={c.id} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4 hover:border-indigo-200 transition">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-xs text-indigo-700">{c.complaintNumber}</span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${STATUS_BADGES[c.status].bg} ${STATUS_BADGES[c.status].text}`}>
+                            {STATUS_BADGES[c.status].label}
+                          </span>
+                        </div>
+                        <h4 className="text-sm font-bold text-slate-900 mt-1">{c.title}</h4>
+                        <span className="text-xs text-slate-500">{c.customerName} · {c.city} ({CATEGORY_LABELS[c.category]})</span>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          setSelectedComplaint(c);
+                          setDrawerActiveTab('assessment');
+                          handleRunResponsibilityEngine(c.id);
+                        }}
+                        className="text-xs font-bold px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex items-center gap-1 transition"
+                      >
+                        <TargetIcon className="w-3.5 h-3.5" />
+                        <span>Run Engine</span>
+                      </button>
+                    </div>
+
+                    {/* Pre-conditions & Mandatory Evidence Status */}
+                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs space-y-2">
+                      <div className="flex justify-between items-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                        <span>Mandatory SOP Criteria:</span>
+                        <span>{rule?.mandatory.length || 0} Standards</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {rule?.mandatory.map(req => {
+                          const uploaded = new Set((c.evidence || []).map(e => e.evidenceType));
+                          const hasIt = uploaded.has(req);
+                          return (
+                            <span 
+                              key={req} 
+                              className={`px-2 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1 ${
+                                hasIt ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'
+                              }`}
+                            >
+                              {hasIt ? '✓' : '⚠️ Missing'} {EVIDENCE_TYPE_LABELS[req].split(' ')[0]}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Default Policy Absorption */}
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-semibold">Standard Policy:</span>
+                        <span className="font-bold text-slate-700">Company 100% Absorbed</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setSelectedComplaint(c);
+                          setDrawerActiveTab('assessment');
+                        }}
+                        className="text-xs font-bold text-indigo-600 hover:text-indigo-800"
+                      >
+                        Assessment Details →
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* SUB-TAB 5: APPROVALS */}
         {activeSubTab === 'Approvals' && (
           <div className="max-w-7xl mx-auto space-y-6 animate-fadeIn">
             <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-3">
@@ -1292,7 +1498,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
                 <div className="flex items-center gap-3">
                   <TargetIcon className="w-5 h-5 text-amber-700" />
                   <div>
-                    <span className="text-xs font-bold text-amber-900 block">3 Cases Pending Executive Sanction</span>
+                    <span className="text-xs font-bold text-amber-900 block">Cases Pending Executive Sanction</span>
                     <span className="text-[11px] text-amber-700">Financial absorption &gt; ₹5,000 requires Operations Manager + COO approval</span>
                   </div>
                 </div>
@@ -1307,7 +1513,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
           </div>
         )}
 
-        {/* SUB-TAB 5: EMPLOYEE TRACKER */}
+        {/* SUB-TAB 6: EMPLOYEE TRACKER */}
         {activeSubTab === 'Employees' && (
           <div className="max-w-7xl mx-auto space-y-4 animate-fadeIn">
             <div className="flex justify-between items-center">
@@ -1358,7 +1564,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
           </div>
         )}
 
-        {/* SUB-TAB 6: FINANCIAL IMPACT */}
+        {/* SUB-TAB 7: FINANCIAL IMPACT */}
         {activeSubTab === 'Financial' && summary && (
           <div className="max-w-7xl mx-auto space-y-6 animate-fadeIn">
             <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
@@ -1386,7 +1592,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
           </div>
         )}
 
-        {/* SUB-TAB 7: RULES & GOVERNANCE */}
+        {/* SUB-TAB 8: RULES & GOVERNANCE */}
         {activeSubTab === 'Rules' && (
           <div className="max-w-7xl mx-auto space-y-4 animate-fadeIn">
             <div>
@@ -1426,7 +1632,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
         )}
       </div>
 
-      {/* DETAIL DRAWER: SELECTED COMPLAINT INVESTIGATION & EVIDENCE */}
+      {/* DETAIL DRAWER: SELECTED COMPLAINT INVESTIGATION & RESPONSIBILITY */}
       {selectedComplaint && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl max-w-4xl w-full p-6 shadow-2xl border border-slate-200 space-y-5 max-h-[92vh] overflow-y-auto animate-fadeIn">
@@ -1450,19 +1656,21 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
             </div>
 
             {/* Drawer Sub-Navigation Tabs */}
-            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs overflow-x-auto">
               {[
                 { id: 'overview', label: 'Ticket Overview' },
-                { id: 'crew', label: `Crew & Statements (${selectedComplaint.participants?.length || 0})` },
+                { id: 'crew', label: `Crew (${selectedComplaint.participants?.length || 0})` },
                 { id: 'evidence', label: `Evidence Vault (${selectedComplaint.evidence?.length || 0})` },
                 { id: 'investigation', label: 'Root Cause Findings' },
+                { id: 'assessment', label: 'Responsibility Assessment' },
+                { id: 'corrective', label: `Corrective Actions (${correctiveActionsList.length})` },
                 { id: 'financial', label: 'Financial Ledger' },
                 { id: 'actions', label: 'Pipeline Actions' },
               ].map((t) => (
                 <button
                   key={t.id}
                   onClick={() => setDrawerActiveTab(t.id as any)}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all whitespace-nowrap ${
                     drawerActiveTab === t.id
                       ? 'bg-white text-indigo-700 shadow-sm'
                       : 'text-slate-600 hover:text-slate-900'
@@ -1534,7 +1742,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
                   <span className="text-xs font-bold text-slate-700">Employees & Crew on Job:</span>
-                  <span className="text-[11px] text-slate-400">Statements recorded under Section 4 & 5</span>
+                  <span className="text-[11px] text-slate-400">Formal statements logged</span>
                 </div>
 
                 {(selectedComplaint.participants || []).length > 0 ? (
@@ -1606,34 +1814,6 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
                   </button>
                 </div>
 
-                {/* Category Rule Checklist for this specific complaint */}
-                {(() => {
-                  const rule = CATEGORY_EVIDENCE_RULES[selectedComplaint.category];
-                  const uploadedTypes = new Set((selectedComplaint.evidence || []).map(e => e.evidenceType));
-                  return (
-                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs space-y-1.5">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-                        Category Requirements: {CATEGORY_LABELS[selectedComplaint.category]}
-                      </span>
-                      <div className="flex flex-wrap gap-2">
-                        {rule?.mandatory.map(reqType => {
-                          const hasIt = uploadedTypes.has(reqType);
-                          return (
-                            <span 
-                              key={reqType} 
-                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border ${
-                                hasIt ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'
-                              }`}
-                            >
-                              {hasIt ? '✓' : '⚠️ Missing'} {EVIDENCE_TYPE_LABELS[reqType]}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })()}
-
                 {/* Evidence List */}
                 {(selectedComplaint.evidence || []).length > 0 ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -1684,7 +1864,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
               </div>
             )}
 
-            {/* TAB 4: ROOT CAUSE INVESTIGATION FINDINGS */}
+            {/* TAB 4: ROOT CAUSE FINDINGS */}
             {drawerActiveTab === 'investigation' && (
               <form onSubmit={handleSaveInvestigation} className="space-y-4">
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
@@ -1796,7 +1976,227 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
               </form>
             )}
 
-            {/* TAB 5: FINANCIAL LEDGER */}
+            {/* TAB 5: RESPONSIBILITY ASSESSMENT ENGINE (PHASE 4 CORE) */}
+            {drawerActiveTab === 'assessment' && (
+              <div className="space-y-5 animate-fadeIn">
+                {/* Engine Run Action */}
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <span className="text-xs font-bold text-slate-900 block">Evaluate Responsibility Matrix</span>
+                    <span className="text-[11px] text-slate-500">Cross-checks evidence sufficiency, technician statements, and equipment logs</span>
+                  </div>
+                  <button
+                    onClick={() => handleRunResponsibilityEngine()}
+                    disabled={evaluatingResponsibility}
+                    className="text-xs font-bold px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex items-center gap-1.5 transition"
+                  >
+                    <TargetIcon className="w-3.5 h-3.5" />
+                    <span>{evaluatingResponsibility ? 'Evaluating Rule Set...' : 'Run Automated Engine'}</span>
+                  </button>
+                </div>
+
+                {/* Provisional Evaluation Result Card */}
+                {provisionalEvaluation && (
+                  <div className="bg-white rounded-2xl border-2 border-indigo-200 p-5 space-y-4 shadow-sm animate-fadeIn text-xs">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 block">Engine Output (Rule v{provisionalEvaluation.ruleVersion})</span>
+                        <h4 className="text-sm font-extrabold text-slate-900 mt-0.5">
+                          {RESPONSIBLE_PARTY_LABELS[provisionalEvaluation.primaryResponsibleParty]?.label || provisionalEvaluation.primaryResponsibleParty}
+                        </h4>
+                      </div>
+                      <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${
+                        provisionalEvaluation.assessmentStatus === 'RECOMMENDED' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                        provisionalEvaluation.assessmentStatus === 'INVESTIGATION_REQUIRED' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
+                        'bg-amber-50 text-amber-700 border border-amber-200'
+                      }`}>
+                        {provisionalEvaluation.assessmentStatus.replace(/_/g, ' ')}
+                      </span>
+                    </div>
+
+                    {/* Responsibility & Cost Absorption Split Bar */}
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between text-xs font-bold">
+                        <span className="text-rose-700">Company Absorption: {provisionalEvaluation.companySharePct}%</span>
+                        <span className="text-amber-700">Employee Share: {provisionalEvaluation.employeeSharePct}%</span>
+                      </div>
+                      <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden flex">
+                        <div className="bg-rose-500 h-3 transition-all duration-500" style={{ width: `${provisionalEvaluation.companySharePct}%` }} />
+                        <div className="bg-amber-500 h-3 transition-all duration-500" style={{ width: `${provisionalEvaluation.employeeSharePct}%` }} />
+                      </div>
+                    </div>
+
+                    {/* Section 8 Labor Policy Guardrail */}
+                    <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl flex items-start gap-2">
+                      <InfoCircledIcon className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                      <p className="text-[11px] text-amber-900 leading-relaxed font-medium">
+                        <strong>Mandatory Policy Notice:</strong> Per Section 8 Master Specification, employee deductions are strictly prohibited without independent COO authorization, documented employee hearing, and evidence substantiation.
+                      </p>
+                    </div>
+
+                    {/* Rationale & Evidence Reviewed */}
+                    <div className="space-y-2">
+                      <span className="font-bold text-slate-800 block">Responsibility Rationale:</span>
+                      <p className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-slate-700 leading-relaxed">
+                        {provisionalEvaluation.rationale}
+                      </p>
+                    </div>
+
+                    {/* Missing Evidence Warnings if any */}
+                    {provisionalEvaluation.missingEvidenceFlags.length > 0 && (
+                      <div className="bg-rose-50 border border-rose-200 p-3 rounded-xl text-rose-800 space-y-1">
+                        <span className="font-bold block text-[11px]">⚠️ Missing Critical Evidence Flags:</span>
+                        <ul className="list-disc pl-4 text-[10px] space-y-0.5">
+                          {provisionalEvaluation.missingEvidenceFlags.map(f => (
+                            <li key={f}>{f.replace(/_/g, ' ')}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Recommended Remedy & Authority */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+                      <div>
+                        <span className="text-slate-400 block text-[10px] font-bold">Recommended Remedy:</span>
+                        <span className="font-bold text-indigo-700">{provisionalEvaluation.recommendedCorrectiveAction}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[10px] font-bold">Required Approval Level:</span>
+                        <span className="font-black text-slate-900">{provisionalEvaluation.requiredApprovalAuthority}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                      <button
+                        onClick={handleConfirmAssessment}
+                        disabled={confirmingAssessment}
+                        className="text-xs font-bold px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm flex items-center gap-1.5"
+                      >
+                        <CheckIcon className="w-4 h-4" />
+                        <span>{confirmingAssessment ? 'Confirming...' : 'Confirm & Route to Approver'}</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Existing Historical Assessments for this complaint */}
+                <div className="space-y-3">
+                  <span className="text-xs font-bold text-slate-700 block">Assessment Audit History:</span>
+                  {assessmentsList.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic bg-slate-50 p-4 rounded-xl border border-slate-200 text-center">
+                      No responsibility determinations finalized yet. Click "Run Automated Engine" above.
+                    </p>
+                  ) : (
+                    assessmentsList.map((as, idx) => (
+                      <div key={as.id || idx} className="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-2 text-xs">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <span className="font-bold text-slate-900 block">{as.primaryResponsibleParty}</span>
+                            <span className="text-[10px] text-slate-500">Assessed by {as.assessedByName} · {as.createdAt ? new Date(as.createdAt).toLocaleDateString() : 'Active'}</span>
+                          </div>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            as.assessmentStatus === 'CONFIRMED' ? 'bg-emerald-100 text-emerald-800' :
+                            as.assessmentStatus === 'RECOMMENDED' ? 'bg-indigo-100 text-indigo-800' :
+                            'bg-slate-200 text-slate-700'
+                          }`}>
+                            {as.assessmentStatus}
+                          </span>
+                        </div>
+                        <p className="text-slate-600 leading-relaxed">{as.rationale}</p>
+                        <div className="pt-2 border-t border-slate-200 flex justify-between text-[10px] text-slate-500">
+                          <span>Company: {as.companySharePct}% / Employee: {as.employeeSharePct}%</span>
+                          <span>Approval Authority: {as.requiredApprovalAuthority}</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* TAB 6: CORRECTIVE ACTIONS (PHASE 4 TRACKER) */}
+            {drawerActiveTab === 'corrective' && (
+              <div className="space-y-4 animate-fadeIn text-xs">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900">Corrective Actions & Training Remedies</h4>
+                    <p className="text-[10px] text-slate-500">Service rectifications, customer apologies, and technician coaching tasks</p>
+                  </div>
+                  <button
+                    onClick={() => setShowAddCorrectiveModal(true)}
+                    className="text-xs font-bold py-1.5 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex items-center gap-1.5"
+                  >
+                    <PlusIcon className="w-3.5 h-3.5" />
+                    <span>Assign Action</span>
+                  </button>
+                </div>
+
+                {correctiveActionsList.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic bg-slate-50 p-6 rounded-xl border border-slate-200 text-center">
+                    No corrective actions assigned yet. Assessments automatically generate remedy tasks.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {correctiveActionsList.map((ca) => (
+                      <div key={ca.id} className="p-4 rounded-xl border border-slate-200 bg-white space-y-3 shadow-sm">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 uppercase tracking-wider font-mono">
+                              {CORRECTIVE_ACTION_LABELS[ca.actionType] || ca.actionType}
+                            </span>
+                            <h5 className="font-bold text-slate-900 mt-1">{ca.title}</h5>
+                            <p className="text-[11px] text-slate-500 mt-0.5">{ca.description}</p>
+                          </div>
+
+                          <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${
+                            ca.status === 'COMPLETED' || ca.status === 'VERIFIED_EFFECTIVE' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                            ca.status === 'IN_PROGRESS' ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' :
+                            'bg-amber-50 text-amber-700 border border-amber-200'
+                          }`}>
+                            {ca.status.replace(/_/g, ' ')}
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-[10px]">
+                          <span className="text-slate-500">
+                            Due Date: <strong className="text-slate-700">{ca.dueDate}</strong>
+                          </span>
+
+                          <div className="flex items-center gap-2">
+                            {ca.status === 'PENDING' && (
+                              <button
+                                onClick={() => handleToggleCorrectiveActionStatus(ca.id, 'IN_PROGRESS')}
+                                className="font-bold px-2.5 py-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                              >
+                                Start Action →
+                              </button>
+                            )}
+                            {ca.status === 'IN_PROGRESS' && (
+                              <button
+                                onClick={() => handleToggleCorrectiveActionStatus(ca.id, 'COMPLETED')}
+                                className="font-bold px-2.5 py-1 rounded bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                              >
+                                Mark Completed ✓
+                              </button>
+                            )}
+                            {ca.status === 'COMPLETED' && (
+                              <button
+                                onClick={() => handleToggleCorrectiveActionStatus(ca.id, 'VERIFIED_EFFECTIVE')}
+                                className="font-bold px-2.5 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700"
+                              >
+                                Verify Effective (Ops Lead) ✓
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 7: FINANCIAL LEDGER */}
             {drawerActiveTab === 'financial' && (
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
@@ -1828,7 +2228,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
               </div>
             )}
 
-            {/* TAB 6: ACTIONS & PIPELINE */}
+            {/* TAB 8: ACTIONS & PIPELINE */}
             {drawerActiveTab === 'actions' && (
               <div className="space-y-4">
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
@@ -1892,7 +2292,99 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
         </div>
       )}
 
-      {/* MODAL: REGISTER NEW COMPLAINT (WITH CREW & INVESTIGATOR ASSIGNMENT) */}
+      {/* MODAL: ADD CORRECTIVE ACTION */}
+      {showAddCorrectiveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-fadeIn text-xs">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+              <h3 className="text-sm font-bold text-slate-900">Assign Corrective Action</h3>
+              <button onClick={() => setShowAddCorrectiveModal(false)} className="text-slate-400 font-bold">✕</button>
+            </div>
+
+            <form onSubmit={handleCreateCorrectiveActionSubmit} className="space-y-3">
+              <div>
+                <label className="font-semibold text-slate-700 block">Action Type *</label>
+                <select
+                  value={newCorrectiveForm.actionType}
+                  onChange={(e) => setNewCorrectiveForm({ ...newCorrectiveForm, actionType: e.target.value as CorrectiveActionType })}
+                  className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-bold bg-white"
+                >
+                  {Object.entries(CORRECTIVE_ACTION_LABELS).map(([k, lbl]) => (
+                    <option key={k} value={k}>{lbl}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-700 block">Action Title *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Schedule marble re-crystallization with vendor"
+                  value={newCorrectiveForm.title}
+                  onChange={(e) => setNewCorrectiveForm({ ...newCorrectiveForm, title: e.target.value })}
+                  className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-700 block">Target Completion Date *</label>
+                <input
+                  type="date"
+                  required
+                  value={newCorrectiveForm.dueDate}
+                  onChange={(e) => setNewCorrectiveForm({ ...newCorrectiveForm, dueDate: e.target.value })}
+                  className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-700 block">Assignee Staff Member</label>
+                <select
+                  value={newCorrectiveForm.assignedToEmployeeId}
+                  onChange={(e) => setNewCorrectiveForm({ ...newCorrectiveForm, assignedToEmployeeId: e.target.value })}
+                  className="mt-1 w-full border border-slate-300 rounded-lg p-2 bg-white"
+                >
+                  <option value="">General Operations Team</option>
+                  {employees.map(emp => (
+                    <option key={emp.id} value={emp.id}>{emp.fullName} ({emp.city})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-700 block">Action Description & Instructions</label>
+                <textarea
+                  rows={2}
+                  placeholder="Specific scope of rework or coaching guidelines..."
+                  value={newCorrectiveForm.description}
+                  onChange={(e) => setNewCorrectiveForm({ ...newCorrectiveForm, description: e.target.value })}
+                  className="mt-1 w-full border border-slate-300 rounded-lg p-2 font-medium"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowAddCorrectiveModal(false)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingCorrective || !newCorrectiveForm.title}
+                  className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
+                >
+                  {savingCorrective ? 'Assigning...' : 'Assign Action'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: REGISTER NEW COMPLAINT */}
       {showRegisterModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 my-8 max-h-[92vh] overflow-y-auto animate-fadeIn">

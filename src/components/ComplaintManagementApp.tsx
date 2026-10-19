@@ -87,6 +87,8 @@ import { ResponsibilityEvaluationResult } from '../lib/responsibilityEngine';
 
 interface ComplaintManagementAppProps {
   onSwitchToEconomicCalculator: () => void;
+  activeTrackerTab?: string;
+  onTrackerTabChange?: (tab: string) => void;
 }
 
 const CATEGORY_LABELS: Record<ComplaintCategory, string> = {
@@ -172,11 +174,56 @@ const ROOT_CAUSE_CATEGORIES = [
   { id: 'COMPANY_GOODWILL', label: 'Company Goodwill Gesture' },
 ];
 
-export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }: ComplaintManagementAppProps) {
+export default function ComplaintManagementApp({ 
+  onSwitchToEconomicCalculator,
+  activeTrackerTab,
+  onTrackerTabChange,
+}: ComplaintManagementAppProps) {
   // Navigation Section
   const [activeSubTab, setActiveSubTab] = useState<
     'Dashboard' | 'Register' | 'Evidence Centre' | 'Responsibility Review' | 'Approvals' | 'Employees' | 'Financial' | 'Reports' | 'Audit' | 'Rules'
   >('Dashboard');
+
+  // Synchronize internal activeSubTab when sidebar activeTrackerTab changes
+  useEffect(() => {
+    if (!activeTrackerTab) return;
+    if (activeTrackerTab === 'Overview' || activeTrackerTab === 'Dashboard') {
+      setActiveSubTab('Dashboard');
+    } else if (activeTrackerTab === 'Live Tracker Logs' || activeTrackerTab === 'Register' || activeTrackerTab === 'Complaint Register') {
+      setActiveSubTab('Register');
+    } else if (activeTrackerTab === 'Metrics & Trends' || activeTrackerTab === 'Reports' || activeTrackerTab === 'Reports & Analytics') {
+      setActiveSubTab('Reports');
+    } else if (activeTrackerTab === 'Settings & Targets' || activeTrackerTab === 'Rules' || activeTrackerTab === 'Rules & Governance') {
+      setActiveSubTab('Rules');
+    } else if (activeTrackerTab === 'Evidence Centre') {
+      setActiveSubTab('Evidence Centre');
+    } else if (activeTrackerTab === 'Responsibility Review') {
+      setActiveSubTab('Responsibility Review');
+    } else if (activeTrackerTab === 'Approval Centre' || activeTrackerTab === 'Approvals') {
+      setActiveSubTab('Approvals');
+    } else if (activeTrackerTab === 'Employee Tracker' || activeTrackerTab === 'Employees') {
+      setActiveSubTab('Employees');
+    } else if (activeTrackerTab === 'Financial Impact' || activeTrackerTab === 'Financial') {
+      setActiveSubTab('Financial');
+    } else if (activeTrackerTab === 'Audit History' || activeTrackerTab === 'Audit') {
+      setActiveSubTab('Audit');
+    }
+  }, [activeTrackerTab]);
+
+  const handleSubTabClick = (tabId: typeof activeSubTab) => {
+    setActiveSubTab(tabId);
+    if (onTrackerTabChange) {
+      if (tabId === 'Dashboard') onTrackerTabChange('Overview');
+      else if (tabId === 'Register') onTrackerTabChange('Live Tracker Logs');
+      else if (tabId === 'Reports') onTrackerTabChange('Metrics & Trends');
+      else if (tabId === 'Rules') onTrackerTabChange('Settings & Targets');
+      else if (tabId === 'Approvals') onTrackerTabChange('Approval Centre');
+      else if (tabId === 'Employees') onTrackerTabChange('Employee Tracker');
+      else if (tabId === 'Financial') onTrackerTabChange('Financial Impact');
+      else if (tabId === 'Audit') onTrackerTabChange('Audit History');
+      else onTrackerTabChange(tabId);
+    }
+  };
 
   // Audit History State
   const [auditLogsList, setAuditLogsList] = useState<any[]>([]);
@@ -1270,7 +1317,7 @@ export default function ComplaintManagementApp({ onSwitchToEconomicCalculator }:
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveSubTab(tab.id as any)}
+                onClick={() => handleSubTabClick(tab.id as any)}
                 className={`text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all ${
                   isActive
                     ? 'bg-white text-indigo-700 shadow-sm'

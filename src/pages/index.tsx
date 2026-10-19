@@ -509,7 +509,13 @@ export default function App() {
   const trackerNavItems = [
     { name: 'Overview', icon: DashboardIcon },
     { name: 'Live Tracker Logs', icon: TableIcon },
+    { name: 'Evidence Centre', icon: LayersIcon },
+    { name: 'Responsibility Review', icon: ActivityLogIcon },
+    { name: 'Approval Centre', icon: CheckCircledIcon },
+    { name: 'Employee Tracker', icon: TargetIcon },
+    { name: 'Financial Impact', icon: BarChartIcon },
     { name: 'Metrics & Trends', icon: BarChartIcon },
+    { name: 'Audit History', icon: ActivityLogIcon },
     { name: 'Settings & Targets', icon: GearIcon },
   ];
 
@@ -838,6 +844,8 @@ export default function App() {
         {selectedApp === 'complaint-management' ? (
           <ComplaintManagementApp 
             onSwitchToEconomicCalculator={() => setSelectedApp('economic-calculator')} 
+            activeTrackerTab={activeTrackerTab}
+            onTrackerTabChange={(tab) => setActiveTrackerTab(tab)}
           />
         ) : (
           <div className="flex-1 overflow-auto p-8">

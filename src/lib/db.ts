@@ -473,14 +473,32 @@ export async function getDailyData(targetDate: Date) {
 export async function upsertDailyRecord(data: {
   unitId: string;
   date: Date;
+  grossRevenue?: number;
+  gstAmount?: number;
   earnedRevenue?: number;
   additionalDirectExpenses?: number;
   usedHours?: number;
   finalized?: boolean;
   notes?: string;
+  remarks?: string;
 }) {
-  const { unitId, date, earnedRevenue = 0, additionalDirectExpenses = 0, usedHours = 0, finalized = false, notes } = data;
+  const { 
+    unitId, 
+    date, 
+    grossRevenue,
+    gstAmount,
+    earnedRevenue = 0, 
+    additionalDirectExpenses = 0, 
+    usedHours = 0, 
+    finalized = false, 
+    notes,
+    remarks 
+  } = data;
   const dateStr = date.toISOString().split('T')[0];
+  const finalNotes = notes || remarks || null;
+  const numEarned = Number(earnedRevenue);
+  const numGross = grossRevenue !== undefined ? Number(grossRevenue) : numEarned;
+  const numGst = gstAmount !== undefined ? Number(gstAmount) : (numGross > 0 ? Math.round(numGross * (18 / 118) * 100) / 100 : 0);
 
   if (supabase) {
     try {
@@ -504,39 +522,93 @@ export async function upsertDailyRecord(data: {
         .maybeSingle();
 
       if (existing) {
+        // First try update with new columns (grossRevenue, gstAmount, remarks, notes)
+        const fullPayload: Record<string, any> = {
+          earnedRevenue: numEarned,
+          grossRevenue: numGross,
+          gstAmount: numGst,
+          standardFixedCost,
+          additionalDirectExpenses: Number(additionalDirectExpenses),
+          usedHours: Number(usedHours),
+          finalized: Boolean(finalized),
+          notes: finalNotes,
+          remarks: finalNotes,
+          updatedAt: new Date().toISOString(),
+        };
+
         const { data: updated, error } = await supabase
           .from('DailyRecord')
-          .update({
-            earnedRevenue: Number(earnedRevenue),
-            standardFixedCost,
-            additionalDirectExpenses: Number(additionalDirectExpenses),
-            usedHours: Number(usedHours),
-            finalized: Boolean(finalized),
-            notes,
-            updatedAt: new Date().toISOString(),
-          })
+          .update(fullPayload)
           .eq('id', existing.id)
           .select()
           .single();
-        if (error) throw error;
-        if (updated) return updated;
-      } else {
-        const { data: created, error } = await supabase
-          .from('DailyRecord')
-          .insert([{
-            unitId,
-            date: `${dateStr}T00:00:00Z`,
-            earnedRevenue: Number(earnedRevenue),
+
+        if (error) {
+          // If columns don't exist yet in Supabase, retry with core columns
+          const fallbackPayload: Record<string, any> = {
+            earnedRevenue: numEarned,
             standardFixedCost,
             additionalDirectExpenses: Number(additionalDirectExpenses),
             usedHours: Number(usedHours),
             finalized: Boolean(finalized),
-            notes,
-          }])
+            notes: finalNotes,
+            updatedAt: new Date().toISOString(),
+          };
+          const { data: fbUpdated, error: fbErr } = await supabase
+            .from('DailyRecord')
+            .update(fallbackPayload)
+            .eq('id', existing.id)
+            .select()
+            .single();
+          if (fbErr) throw fbErr;
+          if (fbUpdated) return fbUpdated;
+        } else if (updated) {
+          return updated;
+        }
+      } else {
+        // Try full insert
+        const fullInsert: Record<string, any> = {
+          unitId,
+          date: `${dateStr}T00:00:00Z`,
+          earnedRevenue: numEarned,
+          grossRevenue: numGross,
+          gstAmount: numGst,
+          standardFixedCost,
+          additionalDirectExpenses: Number(additionalDirectExpenses),
+          usedHours: Number(usedHours),
+          finalized: Boolean(finalized),
+          notes: finalNotes,
+          remarks: finalNotes,
+        };
+
+        const { data: created, error } = await supabase
+          .from('DailyRecord')
+          .insert([fullInsert])
           .select()
           .single();
-        if (error) throw error;
-        if (created) return created;
+
+        if (error) {
+          // Fallback insert
+          const fbInsert: Record<string, any> = {
+            unitId,
+            date: `${dateStr}T00:00:00Z`,
+            earnedRevenue: numEarned,
+            standardFixedCost,
+            additionalDirectExpenses: Number(additionalDirectExpenses),
+            usedHours: Number(usedHours),
+            finalized: Boolean(finalized),
+            notes: finalNotes,
+          };
+          const { data: fbCreated, error: fbErr } = await supabase
+            .from('DailyRecord')
+            .insert([fbInsert])
+            .select()
+            .single();
+          if (fbErr) throw fbErr;
+          if (fbCreated) return fbCreated;
+        } else if (created) {
+          return created;
+        }
       }
     } catch (err: any) {
       console.warn('Supabase upsertDailyRecord failed:', err);
@@ -557,21 +629,27 @@ export async function upsertDailyRecord(data: {
   return prisma.dailyRecord.upsert({
     where: { date_unitId: { date, unitId } },
     update: {
-      earnedRevenue: Number(earnedRevenue),
+      grossRevenue: numGross,
+      gstAmount: numGst,
+      earnedRevenue: numEarned,
       additionalDirectExpenses: Number(additionalDirectExpenses),
       usedHours: Number(usedHours),
       finalized: Boolean(finalized),
-      notes,
+      notes: finalNotes,
+      remarks: finalNotes,
     },
     create: {
       date,
       unitId,
-      earnedRevenue: Number(earnedRevenue),
+      grossRevenue: numGross,
+      gstAmount: numGst,
+      earnedRevenue: numEarned,
       standardFixedCost,
       additionalDirectExpenses: Number(additionalDirectExpenses),
       usedHours: Number(usedHours),
       finalized: Boolean(finalized),
-      notes,
+      notes: finalNotes,
+      remarks: finalNotes,
     },
   });
 }

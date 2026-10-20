@@ -18,18 +18,32 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (req.method === 'POST') {
     try {
-      const { unitId, date, earnedRevenue, additionalDirectExpenses, usedHours, finalized, notes } = req.body;
+      const { 
+        unitId, 
+        date, 
+        grossRevenue,
+        gstAmount,
+        earnedRevenue, 
+        additionalDirectExpenses, 
+        usedHours, 
+        finalized, 
+        notes,
+        remarks 
+      } = req.body;
       const targetDate = date ? new Date(date) : new Date();
       targetDate.setHours(0, 0, 0, 0);
 
       const record = await upsertDailyRecord({
         unitId,
         date: targetDate,
+        grossRevenue,
+        gstAmount,
         earnedRevenue,
         additionalDirectExpenses,
         usedHours,
         finalized,
-        notes,
+        notes: notes || remarks,
+        remarks: remarks || notes,
       });
 
       return res.status(200).json(record);

@@ -45,8 +45,15 @@ export default function App() {
     return d.toISOString().split('T')[0];
   });
 
-  // Local editable state for instantaneous table & card calculation
-  const [rowInputs, setRowInputs] = useState<Record<string, { earnedRevenue: number; additionalDirectExpenses: number; usedHours: number }>>({});
+  // Local editable state for instantaneous table & card calculation (supports 18% GST auto-reduction and daily remarks)
+  const [rowInputs, setRowInputs] = useState<Record<string, { 
+    grossRevenue: number;
+    earnedRevenue: number; 
+    gstAmount: number;
+    additionalDirectExpenses: number; 
+    usedHours: number;
+    notes: string;
+  }>>({});
 
   // Analytics Dashboard State (Weekly / Monthly / Custom Period)
   const [analyticsPeriod, setAnalyticsPeriod] = useState<'weekly' | 'monthly' | 'custom'>('weekly');
@@ -119,14 +126,28 @@ export default function App() {
       if (Array.isArray(jobsRes)) setJobs(jobsRes);
       if (dailyRes && dailyRes.records) {
         setDailyData(dailyRes);
-        // Initialize rowInputs from fetched daily records
+        // Initialize rowInputs from fetched daily records with GST and remarks
         const inputs: Record<string, any> = {};
         unitsRes.forEach((u: any) => {
           const rec = dailyRes.records.find((r: any) => r.unitId === u.id);
+          const earned = rec ? Number(rec.earnedRevenue) || 0 : 0;
+          const gross = rec?.grossRevenue !== undefined && rec?.grossRevenue !== null && Number(rec.grossRevenue) > 0
+            ? Number(rec.grossRevenue)
+            : (rec ? earned : 0);
+          const gst = rec?.gstAmount !== undefined && rec?.gstAmount !== null && Number(rec.gstAmount) > 0
+            ? Number(rec.gstAmount)
+            : (gross > 0 ? Math.round(gross * (18 / 118) * 100) / 100 : 0);
+          const net = rec?.grossRevenue !== undefined && rec?.grossRevenue !== null && Number(rec.grossRevenue) > 0
+            ? earned
+            : (gross > 0 ? Math.round((gross - gst) * 100) / 100 : 0);
+
           inputs[u.id] = {
-            earnedRevenue: rec ? rec.earnedRevenue : 0,
-            additionalDirectExpenses: rec ? rec.additionalDirectExpenses : 0,
-            usedHours: rec ? rec.usedHours : 0,
+            grossRevenue: gross,
+            earnedRevenue: net,
+            gstAmount: gst,
+            additionalDirectExpenses: rec ? Number(rec.additionalDirectExpenses) || 0 : 0,
+            usedHours: rec ? Number(rec.usedHours) || 0 : 0,
+            notes: rec ? (rec.notes || rec.remarks || '') : '',
           };
         });
         setRowInputs(inputs);
@@ -352,30 +373,72 @@ export default function App() {
     loadAnalytics();
   };
 
-  // Update input locally for immediate calculation
-  const handleInputChange = (unitId: string, field: 'earnedRevenue' | 'additionalDirectExpenses' | 'usedHours', value: number) => {
-    setRowInputs((prev) => ({
-      ...prev,
-      [unitId]: {
-        earnedRevenue: field === 'earnedRevenue' ? value : (prev[unitId]?.earnedRevenue || 0),
-        additionalDirectExpenses: field === 'additionalDirectExpenses' ? value : (prev[unitId]?.additionalDirectExpenses || 0),
-        usedHours: field === 'usedHours' ? value : (prev[unitId]?.usedHours || 0),
-      },
-    }));
+  // Update input locally for immediate calculation with automatic 18% GST reduction
+  const handleInputChange = (
+    unitId: string, 
+    field: 'grossRevenue' | 'earnedRevenue' | 'additionalDirectExpenses' | 'usedHours' | 'notes', 
+    value: any
+  ) => {
+    setRowInputs((prev) => {
+      const prevRow = prev[unitId] || {
+        grossRevenue: 0,
+        earnedRevenue: 0,
+        gstAmount: 0,
+        additionalDirectExpenses: 0,
+        usedHours: 0,
+        notes: '',
+      };
+
+      if (field === 'grossRevenue' || field === 'earnedRevenue') {
+        const gross = Number(value) || 0;
+        // Standard SAC 998533 18% GST calculation (Base = Gross / 1.18, GST = Gross - Base)
+        const gst = gross > 0 ? Math.round(gross * (18 / 118) * 100) / 100 : 0;
+        const net = gross > 0 ? Math.round((gross - gst) * 100) / 100 : 0;
+
+        return {
+          ...prev,
+          [unitId]: {
+            ...prevRow,
+            grossRevenue: gross,
+            earnedRevenue: net,
+            gstAmount: gst,
+          },
+        };
+      }
+
+      return {
+        ...prev,
+        [unitId]: {
+          ...prevRow,
+          [field]: field === 'notes' ? String(value) : (Number(value) || 0),
+        },
+      };
+    });
   };
 
   // Save to database on blur
   const saveDailyRecord = async (unitId: string) => {
-    const current = rowInputs[unitId] || { earnedRevenue: 0, additionalDirectExpenses: 0, usedHours: 0 };
+    const current = rowInputs[unitId] || { 
+      grossRevenue: 0, 
+      earnedRevenue: 0, 
+      gstAmount: 0, 
+      additionalDirectExpenses: 0, 
+      usedHours: 0, 
+      notes: '' 
+    };
     const existingRec = dailyData.records.find((r: any) => r.unitId === unitId);
 
     const body = {
       unitId,
       date: selectedDate,
+      grossRevenue: current.grossRevenue,
+      gstAmount: current.gstAmount,
       earnedRevenue: current.earnedRevenue,
       additionalDirectExpenses: current.additionalDirectExpenses,
       usedHours: current.usedHours,
       finalized: existingRec?.finalized || false,
+      notes: current.notes,
+      remarks: current.notes,
     };
 
     await fetch('/api/daily', {
@@ -391,7 +454,14 @@ export default function App() {
 
   // Toggle finalize day
   const toggleFinalize = async (unitId: string) => {
-    const current = rowInputs[unitId] || { earnedRevenue: 0, additionalDirectExpenses: 0, usedHours: 0 };
+    const current = rowInputs[unitId] || { 
+      grossRevenue: 0, 
+      earnedRevenue: 0, 
+      gstAmount: 0, 
+      additionalDirectExpenses: 0, 
+      usedHours: 0, 
+      notes: '' 
+    };
     const existingRec = dailyData.records.find((r: any) => r.unitId === unitId);
     const finalized = !existingRec?.finalized;
 
@@ -401,10 +471,14 @@ export default function App() {
       body: JSON.stringify({
         unitId,
         date: selectedDate,
+        grossRevenue: current.grossRevenue,
+        gstAmount: current.gstAmount,
         earnedRevenue: current.earnedRevenue,
         additionalDirectExpenses: current.additionalDirectExpenses,
         usedHours: current.usedHours,
         finalized,
+        notes: current.notes,
+        remarks: current.notes,
       }),
     });
 
@@ -1066,10 +1140,19 @@ export default function App() {
                         <th className="px-5 py-3">Operating Unit</th>
                         <th className="px-4 py-3 text-right">{isPeriodMode ? 'Period Target' : 'Daily Target'}</th>
                         <th className="px-4 py-3 text-right">{isPeriodMode ? 'Period Fixed Cost' : 'Fixed Cost'}</th>
-                        <th className="px-4 py-3 text-right">{isPeriodMode ? 'Period Earned Revenue' : 'Earned Revenue (Edit)'}</th>
+                        <th className="px-4 py-3 text-right">
+                          {isPeriodMode ? 'Period Billed (Gross)' : 'Amount (Gross)'}
+                        </th>
+                        <th className="px-4 py-3 text-right">
+                          <div className="flex flex-col items-end">
+                            <span>Net Revenue</span>
+                            <span className="text-[9px] text-emerald-600 font-bold lowercase">(-18% gst)</span>
+                          </div>
+                        </th>
                         <th className="px-4 py-3 text-right">{isPeriodMode ? 'Period Addl Cost' : 'Addl Direct Cost'}</th>
                         <th className="px-4 py-3 text-right">Contribution</th>
                         <th className="px-4 py-3 text-center">{isPeriodMode ? 'Period Hours' : 'Hours (Cap)'}</th>
+                        <th className="px-4 py-3 text-left">Daily Remarks</th>
                         <th className="px-4 py-3 text-center">Status</th>
                       </tr>
                     </thead>
@@ -1081,6 +1164,8 @@ export default function App() {
                           const target = uData ? uData.targetRevenue : 0;
                           const fixedCost = uData ? uData.standardCost : 0;
                           const earned = uData ? uData.earnedRevenue : 0;
+                          const gross = uData?.grossRevenue || earned;
+                          const gst = uData?.gstAmount || Math.round(gross * (18 / 118) * 100) / 100;
                           const addExp = uData ? uData.additionalCost : 0;
                           const contribution = uData ? uData.contribution : (earned - fixedCost - addExp);
                           const hours = uData ? uData.hoursUtilized : 0;
@@ -1097,13 +1182,20 @@ export default function App() {
                               </td>
                               <td className="px-4 py-3.5 text-right font-semibold text-slate-500">{formatINR(target)}</td>
                               <td className="px-4 py-3.5 text-right text-slate-500">{formatINR(fixedCost)}</td>
-                              <td className="px-4 py-3.5 text-right font-bold text-slate-900">{formatINR(earned)}</td>
+                              <td className="px-4 py-3.5 text-right font-bold text-slate-900">{formatINR(gross)}</td>
+                              <td className="px-4 py-3.5 text-right whitespace-nowrap">
+                                <span className="font-bold text-emerald-600 block text-xs">{formatINR(earned)}</span>
+                                <span className="text-[10px] text-slate-400 block">-18% GST: {formatINR(gst)}</span>
+                              </td>
                               <td className="px-4 py-3.5 text-right text-slate-600">{formatINR(addExp)}</td>
                               <td className={`px-4 py-3.5 text-right font-bold ${contribution >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                                 {formatINR(contribution)}
                               </td>
                               <td className="px-4 py-3.5 text-center">
                                 <span className="font-semibold text-slate-800">{hours} / {capHrs} hrs</span>
+                              </td>
+                              <td className="px-4 py-3.5 text-left text-slate-400 text-xs italic">
+                                Period view
                               </td>
                               <td className="px-4 py-3.5 text-center">
                                 <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -1120,13 +1212,23 @@ export default function App() {
                           );
                         }
 
-                        // SINGLE DAY MODE: Live editable actuals
-                        const currentInputs = rowInputs[unit.id] || { earnedRevenue: 0, additionalDirectExpenses: 0, usedHours: 0 };
+                        // SINGLE DAY MODE: Live editable actuals with automatic 18% GST deduction
+                        const currentInputs = rowInputs[unit.id] || { 
+                          grossRevenue: 0, 
+                          earnedRevenue: 0, 
+                          gstAmount: 0, 
+                          additionalDirectExpenses: 0, 
+                          usedHours: 0, 
+                          notes: '' 
+                        };
                         const target = unit.standards?.[0]?.dailyRevenueTarget || (unit.type === 'MAIN_TEAM' ? 15000 : 10000);
                         const fixedCost = unit.standards?.[0]?.standardDailyOperatingCost || (unit.type === 'MAIN_TEAM' ? 8000 : 5500);
+                        const gross = currentInputs.grossRevenue;
                         const earned = currentInputs.earnedRevenue;
+                        const gst = currentInputs.gstAmount;
                         const addExp = currentInputs.additionalDirectExpenses;
                         const hours = currentInputs.usedHours;
+                        const notes = currentInputs.notes || '';
                         const contribution = earned - fixedCost - addExp;
                         const rec = dailyData.records.find((r: any) => r.unitId === unit.id);
 
@@ -1141,19 +1243,38 @@ export default function App() {
                             <td className="px-4 py-3.5 text-right font-semibold text-slate-500">{formatINR(target)}</td>
                             <td className="px-4 py-3.5 text-right text-slate-500">{formatINR(fixedCost)}</td>
                             <td className="px-4 py-3.5 text-right">
-                              <input
-                                type="number"
-                                value={earned}
-                                onChange={(e) => handleInputChange(unit.id, 'earnedRevenue', Number(e.target.value))}
-                                onBlur={() => saveDailyRecord(unit.id)}
-                                className="w-24 text-right border border-slate-300 rounded px-2 py-1 font-bold text-slate-900 focus:ring-1 focus:ring-indigo-500 text-xs bg-white"
-                              />
+                              <div className="flex items-center justify-end gap-1">
+                                <span className="text-slate-400 text-xs">₹</span>
+                                <input
+                                  type="number"
+                                  value={gross === 0 ? '' : gross}
+                                  placeholder="0"
+                                  onChange={(e) => handleInputChange(unit.id, 'grossRevenue', e.target.value)}
+                                  onBlur={() => saveDailyRecord(unit.id)}
+                                  className="w-24 text-right border border-slate-300 rounded px-2 py-1 font-bold text-slate-900 focus:ring-1 focus:ring-indigo-500 text-xs bg-white"
+                                />
+                              </div>
+                            </td>
+                            <td className="px-4 py-3.5 text-right whitespace-nowrap">
+                              <span className="font-bold text-emerald-600 block text-xs">
+                                {formatINR(earned)}
+                              </span>
+                              {gross > 0 ? (
+                                <span className="text-[10px] text-slate-400 block font-medium">
+                                  -18% GST: {formatINR(gst)}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-slate-400 block">
+                                  excl. 18% GST
+                                </span>
+                              )}
                             </td>
                             <td className="px-4 py-3.5 text-right">
                               <input
                                 type="number"
-                                value={addExp}
-                                onChange={(e) => handleInputChange(unit.id, 'additionalDirectExpenses', Number(e.target.value))}
+                                value={addExp === 0 ? '' : addExp}
+                                placeholder="0"
+                                onChange={(e) => handleInputChange(unit.id, 'additionalDirectExpenses', e.target.value)}
                                 onBlur={() => saveDailyRecord(unit.id)}
                                 className="w-20 text-right border border-slate-300 rounded px-2 py-1 text-slate-700 focus:ring-1 focus:ring-indigo-500 text-xs bg-white"
                               />
@@ -1164,10 +1285,21 @@ export default function App() {
                             <td className="px-4 py-3.5 text-center">
                               <input
                                 type="number"
-                                value={hours}
-                                onChange={(e) => handleInputChange(unit.id, 'usedHours', Number(e.target.value))}
+                                value={hours === 0 ? '' : hours}
+                                placeholder="0"
+                                onChange={(e) => handleInputChange(unit.id, 'usedHours', e.target.value)}
                                 onBlur={() => saveDailyRecord(unit.id)}
                                 className="w-14 text-center border border-slate-300 rounded px-1.5 py-1 text-slate-700 text-xs bg-white"
+                              />
+                            </td>
+                            <td className="px-4 py-3.5 text-left">
+                              <input
+                                type="text"
+                                placeholder="Add daily remarks..."
+                                value={notes}
+                                onChange={(e) => handleInputChange(unit.id, 'notes', e.target.value)}
+                                onBlur={() => saveDailyRecord(unit.id)}
+                                className="w-44 border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-700 bg-white focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-400 font-normal"
                               />
                             </td>
                             <td className="px-4 py-3.5 text-center">
@@ -2012,49 +2144,75 @@ export default function App() {
                 {units.map((unit) => {
                   const rec = dailyData.records.find((r: any) => r.unitId === unit.id);
                   const fixedCost = unit.standards?.[0]?.standardDailyOperatingCost || (unit.type === 'MAIN_TEAM' ? 8000 : 5500);
-                  const currentInputs = rowInputs[unit.id] || { earnedRevenue: 0, additionalDirectExpenses: 0, usedHours: 0 };
+                  const currentInputs = rowInputs[unit.id] || { 
+                    grossRevenue: 0, 
+                    earnedRevenue: 0, 
+                    gstAmount: 0, 
+                    additionalDirectExpenses: 0, 
+                    usedHours: 0, 
+                    notes: '' 
+                  };
 
                   return (
-                    <div key={unit.id} className="p-4 bg-slate-50 rounded-lg border border-slate-200 flex items-center justify-between">
+                    <div key={unit.id} className="p-4 bg-slate-50 rounded-lg border border-slate-200 flex flex-wrap items-center justify-between gap-4">
                       <div>
                         <h4 className="font-bold text-xs text-slate-900">{unit.name}</h4>
                         <span className="text-[10px] text-slate-500">Fixed Cost: {formatINR(fixedCost)}</span>
                       </div>
-                      <div className="flex items-center gap-4 text-xs">
+                      <div className="flex flex-wrap items-center gap-4 text-xs">
                         <div>
-                          <label className="text-[10px] text-slate-500 block">Earned Rev (₹)</label>
+                          <label className="text-[10px] text-slate-500 block">Billed (Gross ₹)</label>
                           <input
                             type="number"
-                            value={currentInputs.earnedRevenue}
-                            onChange={(e) => handleInputChange(unit.id, 'earnedRevenue', Number(e.target.value))}
+                            value={currentInputs.grossRevenue === 0 ? '' : currentInputs.grossRevenue}
+                            placeholder="0"
+                            onChange={(e) => handleInputChange(unit.id, 'grossRevenue', e.target.value)}
                             onBlur={() => saveDailyRecord(unit.id)}
-                            className="w-24 border border-slate-300 rounded px-2 py-1 font-bold bg-white"
+                            className="w-24 border border-slate-300 rounded px-2 py-1 font-bold bg-white text-right"
                           />
+                        </div>
+                        <div className="text-right">
+                          <label className="text-[10px] text-emerald-600 font-bold block">Net (-18% GST)</label>
+                          <span className="font-bold text-emerald-700 block text-xs">{formatINR(currentInputs.earnedRevenue)}</span>
+                          <span className="text-[9px] text-slate-400 block font-medium">GST: -{formatINR(currentInputs.gstAmount)}</span>
                         </div>
                         <div>
                           <label className="text-[10px] text-slate-500 block">Direct Expenses (₹)</label>
                           <input
                             type="number"
-                            value={currentInputs.additionalDirectExpenses}
-                            onChange={(e) => handleInputChange(unit.id, 'additionalDirectExpenses', Number(e.target.value))}
+                            value={currentInputs.additionalDirectExpenses === 0 ? '' : currentInputs.additionalDirectExpenses}
+                            placeholder="0"
+                            onChange={(e) => handleInputChange(unit.id, 'additionalDirectExpenses', e.target.value)}
                             onBlur={() => saveDailyRecord(unit.id)}
-                            className="w-24 border border-slate-300 rounded px-2 py-1 bg-white"
+                            className="w-20 border border-slate-300 rounded px-2 py-1 bg-white text-right"
                           />
                         </div>
                         <div>
                           <label className="text-[10px] text-slate-500 block">Hours</label>
                           <input
                             type="number"
-                            value={currentInputs.usedHours}
-                            onChange={(e) => handleInputChange(unit.id, 'usedHours', Number(e.target.value))}
+                            value={currentInputs.usedHours === 0 ? '' : currentInputs.usedHours}
+                            placeholder="0"
+                            onChange={(e) => handleInputChange(unit.id, 'usedHours', e.target.value)}
                             onBlur={() => saveDailyRecord(unit.id)}
-                            className="w-16 border border-slate-300 rounded px-2 py-1 text-center bg-white"
+                            className="w-14 border border-slate-300 rounded px-1.5 py-1 text-center bg-white"
+                          />
+                        </div>
+                        <div className="flex-1 min-w-[160px]">
+                          <label className="text-[10px] text-slate-500 block">Daily Remarks</label>
+                          <input
+                            type="text"
+                            placeholder="Add remarks..."
+                            value={currentInputs.notes || ''}
+                            onChange={(e) => handleInputChange(unit.id, 'notes', e.target.value)}
+                            onBlur={() => saveDailyRecord(unit.id)}
+                            className="w-full border border-slate-300 rounded px-2 py-1 text-xs bg-white text-slate-700"
                           />
                         </div>
                         <button
                           onClick={() => toggleFinalize(unit.id)}
-                          className={`mt-3 text-xs font-bold px-3 py-1.5 rounded ${
-                            rec?.finalized ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-700'
+                          className={`mt-3 text-xs font-bold px-3 py-1.5 rounded transition ${
+                            rec?.finalized ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
                           }`}
                         >
                           {rec?.finalized ? 'Finalized ✓' : 'Mark Final'}

@@ -129,11 +129,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const uJobs = jobs.filter((j: any) => j.unitId === u.id);
 
       let earned = uRecords.reduce((acc: number, r: any) => acc + (Number(r.earnedRevenue) || 0), 0);
+      let gross = uRecords.reduce((acc: number, r: any) => acc + (Number(r.grossRevenue) || Number(r.earnedRevenue) || 0), 0);
+      let gst = uRecords.reduce((acc: number, r: any) => acc + (Number(r.gstAmount) || (gross > 0 ? Math.round(gross * (18 / 118)) : 0)), 0);
       let addExp = uRecords.reduce((acc: number, r: any) => acc + (Number(r.additionalDirectExpenses) || 0), 0);
       let usedHrs = uRecords.reduce((acc: number, r: any) => acc + (Number(r.usedHours) || 0), 0);
 
       if (earned === 0 && uJobs.length > 0) {
-        earned = uJobs.reduce((acc: number, j: any) => acc + (Number(j.earnedRevenue) || 0), 0);
+        gross = uJobs.reduce((acc: number, j: any) => acc + (Number(j.earnedRevenue) || 0), 0);
+        gst = Math.round(gross * (18 / 118) * 100) / 100;
+        earned = Math.round((gross - gst) * 100) / 100;
         usedHrs = uJobs.reduce((acc: number, j: any) => acc + (Number(j.actualDurationHr) || Number(j.estimatedDurationHr) || 0), 0);
         addExp = uJobs.reduce((acc: number, j: any) => {
           const costSum = (j.costs || []).reduce(
@@ -153,6 +157,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         unitName: u.name,
         unitType: u.type,
         targetRevenue: target,
+        grossRevenue: gross,
+        gstAmount: gst,
         earnedRevenue: earned,
         revenueVariance: earned - target,
         achievementPct: target > 0 ? Math.round((earned / target) * 100) : 0,

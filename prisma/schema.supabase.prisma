@@ -104,12 +104,15 @@ model DailyRecord {
   date                     DateTime
   unitId                   String
   unit                     Unit     @relation(fields: [unitId], references: [id])
+  grossRevenue             Float    @default(0)
+  gstAmount                Float    @default(0)
   earnedRevenue            Float    @default(0)
   standardFixedCost        Float    @default(0)
   additionalDirectExpenses Float    @default(0)
   usedHours                Float    @default(0)
   finalized                Boolean  @default(false)
   notes                    String?
+  remarks                  String?
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
 
